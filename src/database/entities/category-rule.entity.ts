@@ -1,12 +1,10 @@
 import { Entity, PrimaryColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Index, BeforeInsert } from 'typeorm';
 import { User } from './user.entity';
-import { PaymentMethod, ExpenseSource } from '../enums';
 import { randomUUID } from 'crypto';
 
-@Entity('expenses')
-@Index(['userId', 'date'])
-@Index(['userId', 'category'])
-export class Expense {
+@Entity('category_rules')
+@Index(['userId'])
+export class CategoryRule {
   @PrimaryColumn('varchar')
   id: string;
 
@@ -20,32 +18,11 @@ export class Expense {
   @Column()
   userId: string;
 
-  @Column('float')
-  amount: number;
+  @Column()
+  merchant: string;
 
   @Column()
   category: string;
-
-  @Column({ type: 'text', nullable: true })
-  note: string | null;
-
-  @Column({ type: 'timestamp with time zone' })
-  date: Date;
-
-  @Column({
-    type: 'varchar',
-    default: PaymentMethod.UPI,
-  })
-  method: PaymentMethod;
-
-  @Column({
-    type: 'varchar',
-    default: ExpenseSource.MANUAL,
-  })
-  source: ExpenseSource;
-
-  @Column({ type: 'varchar', nullable: true })
-  merchant: string | null;
 
   @Column({ type: 'varchar', nullable: true })
   @Index()
@@ -63,7 +40,7 @@ export class Expense {
   @UpdateDateColumn()
   updatedAt: Date;
 
-  @ManyToOne(() => User, (user) => user.expenses, { onDelete: 'CASCADE' })
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
   user: User;
 }

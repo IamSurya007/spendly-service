@@ -49,6 +49,16 @@ export class Investment {
   @Column({ type: 'varchar', nullable: true })
   institution: string | null;
 
+  @Column({ type: 'varchar', nullable: true })
+  @Index()
+  clientId: string | null;
+
+  @Column({ type: 'int', default: 1 })
+  version: number;
+
+  @Column({ type: 'boolean', default: false })
+  isDeleted: boolean;
+
   @CreateDateColumn()
   createdAt: Date;
 

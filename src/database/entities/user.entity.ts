@@ -3,6 +3,7 @@ import { Expense } from './expense.entity';
 import { Budget } from './budget.entity';
 import { Loan } from './loan.entity';
 import { Investment } from './investment.entity';
+import { CategoryRule } from './category-rule.entity';
 
 @Entity('users')
 export class User {
@@ -50,4 +51,7 @@ export class User {
 
   @OneToMany(() => Investment, (investment) => investment.user, { cascade: true })
   investments: Investment[];
+
+  @OneToMany(() => CategoryRule, (rule) => rule.user, { cascade: true })
+  categoryRules: CategoryRule[];
 }
