@@ -23,6 +23,7 @@ const mockRepository = () => ({
 describe('SyncService', () => {
   let service: SyncService;
   let expenseRepo: any;
+  let budgetRepo: any;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -38,6 +39,7 @@ describe('SyncService', () => {
 
     service = module.get<SyncService>(SyncService);
     expenseRepo = module.get(getRepositoryToken(Expense));
+    budgetRepo = module.get(getRepositoryToken(Budget));
   });
 
   it('should be defined', () => {
@@ -172,6 +174,47 @@ describe('SyncService', () => {
       expect(existingExpense.isDeleted).toBe(true);
       expect(existingExpense.version).toBe(2);
       expect(expenseRepo.save).toHaveBeenCalledWith(existingExpense);
+    });
+  });
+
+  describe('processBatch - Budget Unique Constraint Lookup', () => {
+    it('should find budget by month and category if clientId search yields no record', async () => {
+      const existingBudget = {
+        id: 'server-budget-id',
+        clientId: 'old-client-id',
+        userId: 'user-1',
+        month: '2026-07',
+        category: 'Other',
+        limit: 3000,
+        version: 1,
+        isDeleted: false,
+        updatedAt: new Date(),
+      };
+
+      budgetRepo.findOne
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(existingBudget);
+
+      const operations = [
+        {
+          clientId: 'new-client-id',
+          operationType: 'CREATE',
+          clientVersion: 2,
+          payload: {
+            month: '2026-07',
+            category: 'Other',
+            limit: 5000,
+          },
+        },
+      ];
+
+      const result = await service.processBatch('user-1', 'budget', operations);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].status).toBe('applied');
+      expect(existingBudget.clientId).toBe('new-client-id');
+      expect(existingBudget.version).toBe(2);
+      expect(budgetRepo.save).toHaveBeenCalledWith(existingBudget);
     });
   });
 });

@@ -185,6 +185,28 @@ export class SyncService {
     return false;
   }
 
+  private async findExistingRecord(
+    repo: Repository<any>,
+    entityType: string,
+    userId: string,
+    clientId: string,
+    payload: any,
+  ): Promise<any> {
+    let record = await repo.findOne({ where: { userId, clientId } });
+    if (record) return record;
+
+    if (entityType === 'budget' && payload?.month && payload?.category) {
+      record = await repo.findOne({
+        where: {
+          userId,
+          month: payload.month,
+          category: payload.category,
+        },
+      });
+    }
+    return record;
+  }
+
   async processBatch(userId: string, entityType: string, operations: any[]): Promise<any[]> {
     const repo = this.getRepository(entityType);
     const results: any[] = [];
@@ -200,7 +222,7 @@ export class SyncService {
       }
 
       try {
-        const existing = await repo.findOne({ where: { userId, clientId } });
+        const existing = await this.findExistingRecord(repo, entityType, userId, clientId, payload);
 
         if (operationType === 'CREATE') {
           if (!existing) {
@@ -232,6 +254,7 @@ export class SyncService {
             } else {
               const mapped = this.mapPayloadToFields(entityType, payload);
               Object.assign(existing, mapped);
+              existing.clientId = clientId; // Associate this clientId with the record
               existing.version = (existing.version || 1) + 1;
               existing.isDeleted = false;
               existing.updatedAt = new Date();
@@ -275,6 +298,7 @@ export class SyncService {
             } else {
               const mapped = this.mapPayloadToFields(entityType, payload);
               Object.assign(existing, mapped);
+              existing.clientId = clientId; // Associate this clientId with the record
               existing.version = (existing.version || 1) + 1;
               existing.isDeleted = false;
               existing.updatedAt = new Date();
@@ -309,6 +333,7 @@ export class SyncService {
             });
           } else {
             existing.isDeleted = true;
+            existing.clientId = clientId; // Associate this clientId with the record
             existing.version = (existing.version || 1) + 1;
             existing.updatedAt = new Date();
             await repo.save(existing);
