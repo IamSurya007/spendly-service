@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsEnum, IsInt, IsNotEmpty, IsObject, IsOptional, IsUUID, ValidateNested } from 'class-validator';
+import { IsArray, IsEnum, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export enum SyncOperationType {
@@ -10,10 +10,10 @@ export enum SyncOperationType {
 
 export class SyncOperationDto {
   @ApiProperty({
-    description: 'Client-generated UUID (v4) that uniquely identifies a record',
+    description: 'Client-generated identifier (UUID or custom string)',
     example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
   })
-  @IsUUID('4')
+  @IsString()
   @IsNotEmpty()
   clientId: string;
 
