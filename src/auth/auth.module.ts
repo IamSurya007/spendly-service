@@ -1,10 +1,19 @@
 import { Module, Global } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { FirebaseAdminService } from './firebase-admin.service';
 import { AuthGuard } from './auth.guard';
+import { UsersModule } from '../users/users.module';
 
 @Global()
 @Module({
-  providers: [FirebaseAdminService, AuthGuard],
-  exports: [FirebaseAdminService, AuthGuard],
+  imports: [UsersModule],
+  providers: [
+    FirebaseAdminService,
+    {
+      provide: APP_GUARD,
+      useClass: AuthGuard,
+    },
+  ],
+  exports: [FirebaseAdminService],
 })
 export class AuthModule {}

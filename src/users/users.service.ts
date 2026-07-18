@@ -43,6 +43,41 @@ export class UsersService {
     return this.usersRepository.save(user);
   }
 
+  async findOrCreateFromFirebase(decodedToken: any): Promise<User> {
+    const { uid, email, name, picture } = decodedToken;
+
+    // 1. Try to find the user
+    let user = await this.usersRepository.findOne({ where: { id: uid } });
+    if (user) {
+      return user;
+    }
+
+    // 2. If not found, create a new user profile
+    const newUser = this.usersRepository.create({
+      id: uid,
+      name: name || email?.split('@')[0] || 'Firebase User',
+      email: email || `${uid}@firebase.com`,
+      photoUrl: picture || null,
+    });
+
+    try {
+      return await this.usersRepository.save(newUser);
+    } catch (err: any) {
+      // Handle Postgres unique constraint / duplicate key violation (code 23505)
+      if (
+        err.code === '23505' ||
+        err.message?.includes('duplicate key') ||
+        err.message?.includes('unique constraint')
+      ) {
+        const existingUser = await this.usersRepository.findOne({ where: { id: uid } });
+        if (existingUser) {
+          return existingUser;
+        }
+      }
+      throw err;
+    }
+  }
+
   async findOne(id: string): Promise<User> {
     const user = await this.usersRepository.findOne({ where: { id } });
     if (!user) {

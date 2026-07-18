@@ -2,8 +2,6 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
-import { AuthGuard } from './auth/auth.guard';
-import { FirebaseAdminService } from './auth/firebase-admin.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -22,9 +20,6 @@ async function bootstrap() {
     whitelist: true,
   }));
 
-  // Retrieve FirebaseAdminService and apply global AuthGuard
-  const firebaseAdminService = app.get(FirebaseAdminService);
-  app.useGlobalGuards(new AuthGuard(firebaseAdminService));
 
   // Configure Swagger
   const config = new DocumentBuilder()

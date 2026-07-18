@@ -1,9 +1,13 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { FirebaseAdminService } from './firebase-admin.service';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
-  constructor(private firebase: FirebaseAdminService) {}
+  constructor(
+    private firebase: FirebaseAdminService,
+    private usersService: UsersService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
@@ -17,10 +21,15 @@ export class AuthGuard implements CanActivate {
 
     try {
       const decoded = await this.firebase.verifyToken(token);
-      request.user = decoded; // { uid, email, name }
+      const dbUser = await this.usersService.findOrCreateFromFirebase(decoded);
+      request.user = {
+        ...decoded,
+        ...dbUser,
+        uid: dbUser.id, // For backward compatibility with @CurrentUser('uid')
+      };
       return true;
-    } catch (err) {
-      console.error('AuthGuard: Firebase token verification failed:', err.message);
+    } catch (err: any) {
+      console.error('AuthGuard: Firebase token verification/upsert failed:', err.message);
       throw new UnauthorizedException(`Invalid token: ${err.message}`);
     }
   }
