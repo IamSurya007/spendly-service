@@ -61,8 +61,9 @@ jobs:
             npm install
             npm run build
             
+            export NODE_ENV=production
             echo "Reloading application with PM2..."
-            pm2 reload spendly-api --update-env || pm2 start dist/main.js --name spendly-api
+            NODE_ENV=production pm2 reload spendly-api --update-env || NODE_ENV=production pm2 start dist/main.js --name spendly-api
             pm2 save
             
             echo "Deployment completed successfully!"
