@@ -62,7 +62,7 @@ jobs:
             npm run build
             
             echo "Reloading application with PM2..."
-            pm2 reload spendly-service --update-env || pm2 start dist/main.js --name spendly-service
+            pm2 reload spendly-api --update-env || pm2 start dist/main.js --name spendly-api
             pm2 save
             
             echo "Deployment completed successfully!"
