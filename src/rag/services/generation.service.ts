@@ -55,7 +55,7 @@ export class GenerationService {
     const fullContext = combinedContextParts.join('\n\n====================\n\n');
 
     const model = this.genAI.getGenerativeModel({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-3.6-flash',
       systemInstruction: SYSTEM_PROMPT,
     });
 
