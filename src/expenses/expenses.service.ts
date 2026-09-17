@@ -192,7 +192,7 @@ export class ExpensesService {
       },
     });
 
-    const spendExpenses = expenses.filter(exp => exp.isCountedAsSpend !== false);
+    const spendExpenses = expenses.filter(exp => exp.isCountedAsSpend !== false && exp.amount > 0);
 
     const totalExpenses = spendExpenses.reduce((sum, exp) => sum + exp.amount, 0);
     // Since there's no Income table, default to 0

@@ -9,11 +9,12 @@ import { UsersModule } from '../users/users.module';
   imports: [UsersModule],
   providers: [
     FirebaseAdminService,
+    AuthGuard,
     {
       provide: APP_GUARD,
       useClass: AuthGuard,
     },
   ],
-  exports: [FirebaseAdminService],
+  exports: [FirebaseAdminService, UsersModule, AuthGuard],
 })
 export class AuthModule {}
