@@ -7,6 +7,7 @@ import { Loan } from '../database/entities/loan.entity';
 import { Investment } from '../database/entities/investment.entity';
 import { Budget } from '../database/entities/budget.entity';
 import { CategoryRule } from '../database/entities/category-rule.entity';
+import { Account } from '../database/entities/account.entity';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { CategoryRule } from '../database/entities/category-rule.entity';
       Investment,
       Budget,
       CategoryRule,
+      Account,
     ]),
   ],
   controllers: [SyncController],

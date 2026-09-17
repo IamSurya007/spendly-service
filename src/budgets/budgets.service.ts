@@ -109,6 +109,7 @@ export class BudgetsService {
     // Group expenses by category
     const categorySpentMap = new Map<string, number>();
     for (const exp of expenses) {
+      if (exp.isCountedAsSpend === false) continue;
       const current = categorySpentMap.get(exp.category) ?? 0;
       categorySpentMap.set(exp.category, current + exp.amount);
     }

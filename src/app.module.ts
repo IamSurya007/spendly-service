@@ -15,6 +15,7 @@ import { InvestmentsModule } from './investments/investments.module';
 import { SheetsModule } from './sheets/sheets.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { SyncModule } from './sync/sync.module';
+import { AccountsModule } from './accounts/accounts.module';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard } from '@nestjs/throttler';
 
@@ -25,6 +26,7 @@ import { ThrottlerGuard } from '@nestjs/throttler';
     UsersModule,
     NotificationsModule,
     ExpensesModule,
+    AccountsModule,
     BudgetsModule,
     LoansModule,
     InvestmentsModule,

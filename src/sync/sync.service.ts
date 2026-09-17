@@ -6,6 +6,7 @@ import { Loan } from '../database/entities/loan.entity';
 import { Investment } from '../database/entities/investment.entity';
 import { Budget } from '../database/entities/budget.entity';
 import { CategoryRule } from '../database/entities/category-rule.entity';
+import { Account } from '../database/entities/account.entity';
 
 @Injectable()
 export class SyncService {
@@ -20,6 +21,8 @@ export class SyncService {
     private readonly budgetRepo: Repository<Budget>,
     @InjectRepository(CategoryRule)
     private readonly categoryRuleRepo: Repository<CategoryRule>,
+    @InjectRepository(Account)
+    private readonly accountRepo: Repository<Account>,
   ) {}
 
   private getRepository(entityType: string): Repository<any> {
@@ -34,6 +37,8 @@ export class SyncService {
         return this.budgetRepo;
       case 'category_rule':
         return this.categoryRuleRepo;
+      case 'account':
+        return this.accountRepo;
       default:
         throw new BadRequestException(`Invalid entity type: ${entityType}`);
     }
@@ -43,6 +48,9 @@ export class SyncService {
     if (!payload) return {};
     switch (entityType) {
       case 'expense':
+        const isCountedAsSpend = payload.isCountedAsSpend !== undefined
+          ? Boolean(payload.isCountedAsSpend)
+          : (payload.is_counted_as_spend !== undefined ? Boolean(payload.is_counted_as_spend) : true);
         return {
           amount: typeof payload.amount === 'string' ? parseFloat(payload.amount) : (payload.amount || 0),
           category: payload.category || 'Other',
@@ -51,6 +59,19 @@ export class SyncService {
           method: payload.method || 'UPI',
           source: payload.source || 'MANUAL',
           merchant: payload.merchant || null,
+          accountId: payload.accountId || 'default_bank',
+          isCountedAsSpend,
+          createdAt: payload.createdAt ? new Date(payload.createdAt) : undefined,
+        };
+      case 'account':
+        return {
+          id: payload.id || undefined,
+          name: payload.name || 'Primary Bank Account',
+          type: payload.type || 'bank',
+          currentBalance: typeof payload.currentBalance === 'string' ? parseFloat(payload.currentBalance) : (payload.currentBalance || 0),
+          creditLimit: typeof payload.creditLimit === 'string' ? parseFloat(payload.creditLimit) : (payload.creditLimit || 0),
+          accountNumberLast4: payload.accountNumberLast4 || null,
+          colorValue: typeof payload.colorValue === 'string' ? parseInt(payload.colorValue, 10) : (payload.colorValue !== undefined ? payload.colorValue : 4280962800),
           createdAt: payload.createdAt ? new Date(payload.createdAt) : undefined,
         };
       case 'loan':
@@ -108,6 +129,19 @@ export class SyncService {
           method: record.method,
           source: record.source,
           merchant: record.merchant || '',
+          accountId: record.accountId || 'default_bank',
+          isCountedAsSpend: record.isCountedAsSpend ?? true,
+          createdAt: record.createdAt instanceof Date ? record.createdAt.toISOString() : record.createdAt,
+        };
+      case 'account':
+        return {
+          id: record.id,
+          name: record.name,
+          type: record.type,
+          currentBalance: record.currentBalance,
+          creditLimit: record.creditLimit,
+          accountNumberLast4: record.accountNumberLast4 || '',
+          colorValue: record.colorValue,
           createdAt: record.createdAt instanceof Date ? record.createdAt.toISOString() : record.createdAt,
         };
       case 'loan':
@@ -203,8 +237,43 @@ export class SyncService {
           category: payload.category,
         },
       });
+    } else if (entityType === 'account' && payload?.id) {
+      record = await repo.findOne({
+        where: {
+          id: payload.id,
+          userId,
+        },
+      });
     }
     return record;
+  }
+
+  private async ensureAccountExists(userId: string, accountId: string): Promise<boolean> {
+    const existing = await this.accountRepo.findOne({
+      where: [
+        { id: accountId, userId },
+        { clientId: accountId, userId },
+      ],
+    });
+    if (existing) return true;
+
+    if (accountId === 'default_bank') {
+      const defaultAcc = this.accountRepo.create({
+        id: 'default_bank',
+        userId,
+        name: 'Default Bank Account',
+        type: 'bank',
+        currentBalance: 0,
+        creditLimit: 0,
+        accountNumberLast4: '0000',
+        colorValue: 4280962800,
+        version: 1,
+        isDeleted: false,
+      });
+      await this.accountRepo.save(defaultAcc);
+      return true;
+    }
+    return false;
   }
 
   async processBatch(userId: string, entityType: string, operations: any[]): Promise<any[]> {
@@ -219,6 +288,18 @@ export class SyncService {
           status: 'rejected',
         });
         continue;
+      }
+
+      if (entityType === 'expense' && (operationType === 'CREATE' || operationType === 'UPDATE')) {
+        const targetAccountId = payload?.accountId || 'default_bank';
+        const validAccount = await this.ensureAccountExists(userId, targetAccountId);
+        if (!validAccount) {
+          results.push({
+            clientId,
+            status: 'rejected',
+          });
+          continue;
+        }
       }
 
       try {

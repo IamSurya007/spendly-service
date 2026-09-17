@@ -50,6 +50,7 @@ The client batches pending local mutations (creates, updates, and deletes) from 
 * **Path Parameters**:
   - `entityType`: The model collection being synchronized. Must be one of:
     - `expense`
+    - `account`
     - `loan`
     - `investment`
     - `budget`
@@ -185,19 +186,50 @@ Represents individual transactions or financial expenses.
 | `method` | string | Yes | `CASH`, `UPI`, `CARD`, `NETBANKING` | Mode of payment (Uppercase). |
 | `source` | string | Yes | `MANUAL`, `SMS`, `OCR` | Origin of the expense log (Uppercase). |
 | `merchant` | string | Yes | Text string | Merchant/Recipient name. |
+| `accountId` | string | No | String (default: `"default_bank"`) | The associated bank or card account ID. |
+| `isCountedAsSpend` | boolean | No | `true`, `false` (default: `true`) | Indicates whether to include transaction in budget tracking & spend totals. |
 | `createdAt` | string | Yes | ISO 8601 UTC timestamp | The timestamp when the expense was logged. |
 
 **Example Payload**:
 ```json
 {
-  "amount": 250.50,
-  "category": "Food & Dining",
-  "note": "Dinner with team",
-  "date": "2026-07-18T20:30:00.000Z",
+  "id": "uuid-v4-string",
+  "amount": 2500.00,
+  "category": "Groceries",
+  "note": "Weekly supermarket shopping",
+  "date": "2026-09-17T14:00:00.000Z",
   "method": "UPI",
-  "source": "MANUAL",
-  "merchant": "Absolute Barbecues",
-  "createdAt": "2026-07-18T20:32:15.000Z"
+  "source": "SMS",
+  "merchant": "Blinkit",
+  "accountId": "acc_hdfc_1234",
+  "isCountedAsSpend": true,
+  "createdAt": "2026-09-17T14:05:00.000Z"
+}
+```
+
+### 6.2. Account (`account`)
+Represents user bank accounts, credit cards, cash, and digital wallets.
+
+| Field | Type | Required | Format / Enum Values | Description |
+|---|---|---|---|---|
+| `id` | string | Yes | UUID or string | Unique ID of the account. |
+| `name` | string | Yes | E.g. "HDFC Salary Account" | Display name of the account. |
+| `type` | string | Yes | `bank`, `credit_card`, `cash`, `wallet` | Account category. |
+| `currentBalance` | double | Yes | Decimal number | Current available balance. |
+| `creditLimit` | double | Yes | Decimal number | Credit limit for credit card accounts. |
+| `accountNumberLast4` | string | No | String (e.g. "4321") | Last 4 digits of account or card number. |
+| `colorValue` | integer | Yes | ARGB integer (e.g. 4280962800) | Color hex representation. |
+
+**Example Payload**:
+```json
+{
+  "id": "acc_hdfc_1234",
+  "name": "HDFC Salary Account",
+  "type": "bank",
+  "currentBalance": 125000.50,
+  "creditLimit": 0,
+  "accountNumberLast4": "4321",
+  "colorValue": 4280962800
 }
 ```
 

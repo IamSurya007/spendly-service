@@ -152,7 +152,9 @@ export class SchedulerService {
         },
       });
 
-      const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+      const totalExpenses = expenses
+        .filter(e => e.isCountedAsSpend !== false)
+        .reduce((sum, e) => sum + e.amount, 0);
       const totalIncome = 0; // standard default
       const balance = totalIncome - totalExpenses;
 

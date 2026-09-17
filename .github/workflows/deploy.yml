@@ -1,0 +1,80 @@
+name: CI/CD Pipeline - Oracle Cloud VM
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Tests
+        run: npm test
+
+      - name: Build NestJS Application
+        run: npm run build
+
+  deploy-to-oracle-vm:
+    needs: test-and-build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Oracle Cloud VM via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.ORACLE_VM_HOST }}
+          username: ${{ secrets.ORACLE_VM_USER }}
+          key: ${{ secrets.ORACLE_VM_SSH_KEY }}
+          port: ${{ secrets.ORACLE_VM_PORT || 22 }}
+          script: |
+            set -e
+            APP_DIR="${{ secrets.ORACLE_VM_APP_DIR || '/var/www/spendly-service' }}"
+            
+            echo "Deploying Spendly Service to Oracle Cloud VM..."
+            if [ ! -d "$APP_DIR" ]; then
+              sudo mkdir -p "$APP_DIR"
+              sudo chown -R $USER:$USER "$APP_DIR"
+              git clone https://github.com/IamSurya007/spendly-service.git "$APP_DIR"
+            fi
+            
+            cd "$APP_DIR"
+            git fetch --all
+            git reset --hard origin/master
+            
+            npm ci
+            npm run build
+            
+            # Restart service via PM2 if available, or docker compose
+            if command -v pm2 &> /dev/null; then
+              pm2 reload spendly-service --update-env || pm2 start dist/main.js --name spendly-service
+              pm2 save
+            elif command -v docker &> /dev/null && [ -f Dockerfile ]; then
+              docker build -t spendly-service:latest .
+              docker stop spendly-service || true
+              docker rm spendly-service || true
+              docker run -d --name spendly-service -p 3000:3000 --env-file .env spendly-service:latest
+            else
+              echo "Neither PM2 nor Docker found on target VM. Please install PM2 (npm i -g pm2) or Docker."
+              exit 1
+            fi
+            
+            echo "Deployment completed successfully!"

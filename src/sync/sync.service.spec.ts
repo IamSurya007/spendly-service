@@ -6,6 +6,7 @@ import { Loan } from '../database/entities/loan.entity';
 import { Investment } from '../database/entities/investment.entity';
 import { Budget } from '../database/entities/budget.entity';
 import { CategoryRule } from '../database/entities/category-rule.entity';
+import { Account } from '../database/entities/account.entity';
 
 const mockRepository = () => ({
   findOne: jest.fn(),
@@ -24,6 +25,7 @@ describe('SyncService', () => {
   let service: SyncService;
   let expenseRepo: any;
   let budgetRepo: any;
+  let accountRepo: any;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -34,12 +36,14 @@ describe('SyncService', () => {
         { provide: getRepositoryToken(Investment), useFactory: mockRepository },
         { provide: getRepositoryToken(Budget), useFactory: mockRepository },
         { provide: getRepositoryToken(CategoryRule), useFactory: mockRepository },
+        { provide: getRepositoryToken(Account), useFactory: mockRepository },
       ],
     }).compile();
 
     service = module.get<SyncService>(SyncService);
     expenseRepo = module.get(getRepositoryToken(Expense));
     budgetRepo = module.get(getRepositoryToken(Budget));
+    accountRepo = module.get(getRepositoryToken(Account));
   });
 
   it('should be defined', () => {
@@ -49,6 +53,7 @@ describe('SyncService', () => {
   describe('processBatch - CREATE', () => {
     it('should create and save a new record if it does not exist', async () => {
       expenseRepo.findOne.mockResolvedValue(null);
+      accountRepo.findOne.mockResolvedValue({ id: 'default_bank', userId: 'user-1' });
 
       const operations = [
         {
@@ -63,6 +68,8 @@ describe('SyncService', () => {
             method: 'UPI',
             source: 'MANUAL',
             merchant: 'Restaurant',
+            accountId: 'default_bank',
+            isCountedAsSpend: true,
           },
         },
       ];
@@ -78,6 +85,7 @@ describe('SyncService', () => {
     });
 
     it('should return conflict if record already exists and has diverged', async () => {
+      accountRepo.findOne.mockResolvedValue({ id: 'default_bank', userId: 'user-1' });
       const existingExpense = {
         id: 'server-id-1',
         clientId: 'client-uuid-1',
@@ -89,6 +97,8 @@ describe('SyncService', () => {
         method: 'UPI',
         source: 'MANUAL',
         merchant: 'Restaurant',
+        accountId: 'default_bank',
+        isCountedAsSpend: true,
         version: 1,
         isDeleted: false,
         updatedAt: new Date(),
@@ -109,6 +119,8 @@ describe('SyncService', () => {
             method: 'UPI',
             source: 'MANUAL',
             merchant: 'Restaurant',
+            accountId: 'default_bank',
+            isCountedAsSpend: true,
           },
         },
       ];
@@ -121,9 +133,39 @@ describe('SyncService', () => {
     });
   });
 
+  describe('processBatch - Account Sync', () => {
+    it('should create an account entity in sync batch', async () => {
+      accountRepo.findOne.mockResolvedValue(null);
+
+      const operations = [
+        {
+          clientId: 'acc-client-1',
+          operationType: 'CREATE',
+          clientVersion: 1,
+          payload: {
+            id: 'acc_hdfc_1234',
+            name: 'HDFC Salary Account',
+            type: 'bank',
+            currentBalance: 50000,
+            creditLimit: 0,
+            accountNumberLast4: '4321',
+            colorValue: 4280962800,
+          },
+        },
+      ];
+
+      const result = await service.processBatch('user-1', 'account', operations);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].status).toBe('applied');
+      expect(accountRepo.save).toHaveBeenCalled();
+    });
+  });
+
   describe('processBatch - UPDATE', () => {
     it('should upsert the record if it does not exist', async () => {
       expenseRepo.findOne.mockResolvedValue(null);
+      accountRepo.findOne.mockResolvedValue({ id: 'default_bank', userId: 'user-1' });
 
       const operations = [
         {
@@ -133,6 +175,7 @@ describe('SyncService', () => {
           payload: {
             amount: 50,
             category: 'Travel',
+            isCountedAsSpend: false,
           },
         },
       ];

@@ -1,4 +1,4 @@
-import { IsEnum, IsNumber, IsOptional, IsString, MaxLength, Min, IsDateString } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsString, MaxLength, Min, IsDateString, IsBoolean } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { PaymentMethod, ExpenseSource } from '../../database/enums';
 
@@ -10,13 +10,13 @@ export class UpdateExpenseDto {
 
   @IsOptional()
   @IsString()
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   category?: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(200)
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   note?: string;
 
   @IsOptional()
@@ -25,16 +25,28 @@ export class UpdateExpenseDto {
 
   @IsOptional()
   @IsEnum(PaymentMethod)
-  @IsOptional()
   method?: PaymentMethod;
 
   @IsOptional()
   @IsEnum(ExpenseSource)
-  @IsOptional()
   source?: ExpenseSource;
 
   @IsOptional()
   @IsString()
-  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   merchant?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  accountId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value, obj }) => {
+    if (value !== undefined) return Boolean(value);
+    if (obj && obj.is_counted_as_spend !== undefined) return Boolean(obj.is_counted_as_spend);
+    return undefined;
+  })
+  isCountedAsSpend?: boolean;
 }

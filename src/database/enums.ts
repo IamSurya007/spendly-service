@@ -32,3 +32,11 @@ export enum InvestmentType {
   PPF = 'PPF',
   OTHER = 'OTHER',
 }
+
+export enum AccountType {
+  BANK = 'bank',
+  CREDIT_CARD = 'credit_card',
+  CASH = 'cash',
+  WALLET = 'wallet',
+}
+

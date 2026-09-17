@@ -250,7 +250,9 @@ export class SheetsService {
         },
       });
 
-      const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+      const totalExpenses = expenses
+        .filter(e => e.isCountedAsSpend !== false)
+        .reduce((sum, e) => sum + e.amount, 0);
       const totalIncome = 0; // default as there's no Income table
       const balance = totalIncome - totalExpenses;
 

@@ -47,6 +47,13 @@ export class Expense {
   @Column({ type: 'varchar', nullable: true })
   merchant: string | null;
 
+  @Column({ type: 'varchar', default: 'default_bank' })
+  @Index()
+  accountId: string;
+
+  @Column({ type: 'boolean', default: true })
+  isCountedAsSpend: boolean;
+
   @Column({ type: 'varchar', nullable: true })
   @Index()
   clientId: string | null;

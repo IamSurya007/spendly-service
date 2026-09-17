@@ -3,10 +3,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, LessThan } from 'typeorm';
 import { Expense } from '../database/entities/expense.entity';
 import { Budget } from '../database/entities/budget.entity';
+import { Account } from '../database/entities/account.entity';
 import { CreateExpenseDto } from './dto/create-expense.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { QueryExpenseDto } from './dto/query-expense.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AccountType } from '../database/enums';
 
 @Injectable()
 export class ExpensesService {
@@ -15,13 +17,53 @@ export class ExpensesService {
     private readonly expensesRepository: Repository<Expense>,
     @InjectRepository(Budget)
     private readonly budgetsRepository: Repository<Budget>,
+    @InjectRepository(Account)
+    private readonly accountsRepository: Repository<Account>,
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  private async validateAndGetAccountId(userId: string, accountId?: string): Promise<string> {
+    const targetId = accountId && accountId.trim() !== '' ? accountId.trim() : 'default_bank';
+
+    const account = await this.accountsRepository.findOne({
+      where: [
+        { id: targetId, userId, isDeleted: false },
+        { clientId: targetId, userId, isDeleted: false },
+      ],
+    });
+
+    if (account) {
+      return account.id;
+    }
+
+    if (targetId === 'default_bank') {
+      const defaultAcc = this.accountsRepository.create({
+        id: 'default_bank',
+        userId,
+        name: 'Default Bank Account',
+        type: AccountType.BANK,
+        currentBalance: 0,
+        creditLimit: 0,
+        accountNumberLast4: '0000',
+        colorValue: 4280962800,
+        version: 1,
+        isDeleted: false,
+      });
+      await this.accountsRepository.save(defaultAcc);
+      return 'default_bank';
+    }
+
+    throw new BadRequestException(`Account with id '${targetId}' not found for user`);
+  }
+
   async create(userId: string, dto: CreateExpenseDto): Promise<Expense> {
+    const validAccountId = await this.validateAndGetAccountId(userId, dto.accountId);
+
     const expense = this.expensesRepository.create({
       ...dto,
       userId,
+      accountId: validAccountId,
+      isCountedAsSpend: dto.isCountedAsSpend ?? true,
       date: new Date(dto.date),
     });
 
@@ -59,7 +101,6 @@ export class ExpensesService {
         where: { id: query.cursor, userId },
       });
       if (cursorExpense) {
-        // Find expenses with date less than cursor date, OR same date and ID less than cursor ID (for descending order)
         const cursorDate = cursorExpense.date;
         const cursorId = cursorExpense.id;
 
@@ -100,7 +141,11 @@ export class ExpensesService {
 
   async update(userId: string, id: string, dto: UpdateExpenseDto): Promise<Expense> {
     const expense = await this.findOne(userId, id);
-    
+
+    if (dto.accountId !== undefined) {
+      expense.accountId = await this.validateAndGetAccountId(userId, dto.accountId);
+    }
+    if (dto.isCountedAsSpend !== undefined) expense.isCountedAsSpend = dto.isCountedAsSpend;
     if (dto.amount !== undefined) expense.amount = dto.amount;
     if (dto.category !== undefined) expense.category = dto.category;
     if (dto.note !== undefined) expense.note = dto.note;
@@ -111,7 +156,7 @@ export class ExpensesService {
 
     const saved = await this.expensesRepository.save(expense);
 
-    if (dto.category !== undefined || dto.amount !== undefined || dto.date !== undefined) {
+    if (dto.category !== undefined || dto.amount !== undefined || dto.date !== undefined || dto.isCountedAsSpend !== undefined) {
       const dateToCheck = dto.date || expense.date.toISOString();
       const categoryToCheck = dto.category || expense.category;
       this.checkBudgetAlert(userId, categoryToCheck, dateToCheck).catch(err => {
@@ -147,14 +192,16 @@ export class ExpensesService {
       },
     });
 
-    const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+    const spendExpenses = expenses.filter(exp => exp.isCountedAsSpend !== false);
+
+    const totalExpenses = spendExpenses.reduce((sum, exp) => sum + exp.amount, 0);
     // Since there's no Income table, default to 0
     const totalIncome = 0;
     const balance = totalIncome - totalExpenses;
 
     // Group by category
     const categoryMap: { [key: string]: { total: number; count: number } } = {};
-    for (const exp of expenses) {
+    for (const exp of spendExpenses) {
       if (!categoryMap[exp.category]) {
         categoryMap[exp.category] = { total: 0, count: 0 };
       }
@@ -169,7 +216,7 @@ export class ExpensesService {
     }));
 
     return {
-      month,
+      month: targetMonth,
       totalExpenses,
       totalIncome,
       balance,
@@ -179,7 +226,7 @@ export class ExpensesService {
 
   private async checkBudgetAlert(userId: string, category: string, dateStr: string): Promise<void> {
     const month = dateStr.substring(0, 7); // extract "YYYY-MM"
-    
+
     // Find budget for this category
     const budget = await this.budgetsRepository.findOne({
       where: { userId, month, category },
@@ -200,7 +247,9 @@ export class ExpensesService {
       },
     });
 
-    const totalSpent = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+    const spendExpenses = expenses.filter(exp => exp.isCountedAsSpend !== false);
+
+    const totalSpent = spendExpenses.reduce((sum, exp) => sum + exp.amount, 0);
     const percentUsed = (totalSpent / budget.limit) * 100;
 
     if (percentUsed >= 80) {

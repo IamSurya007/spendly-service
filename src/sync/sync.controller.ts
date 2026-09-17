@@ -14,7 +14,7 @@ export class SyncController {
   @ApiOperation({ summary: 'Batch push mutations (creates, updates, deletes) for offline-first sync' })
   @ApiParam({
     name: 'entityType',
-    enum: ['expense', 'loan', 'investment', 'budget', 'category_rule'],
+    enum: ['expense', 'loan', 'investment', 'budget', 'category_rule', 'account'],
     description: 'The model type being synchronized',
   })
   async batchPush(
@@ -30,7 +30,7 @@ export class SyncController {
   @ApiOperation({ summary: 'Pull entity changes since the last sync cursor' })
   @ApiParam({
     name: 'entityType',
-    enum: ['expense', 'loan', 'investment', 'budget', 'category_rule'],
+    enum: ['expense', 'loan', 'investment', 'budget', 'category_rule', 'account'],
     description: 'The model type being synchronized',
   })
   async pull(
