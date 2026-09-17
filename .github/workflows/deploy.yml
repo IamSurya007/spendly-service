@@ -21,7 +21,7 @@ jobs:
           cache: 'npm'
 
       - name: Install Dependencies
-        run: npm ci
+        run: npm install
 
       - name: Run Tests
         run: npm test
@@ -52,7 +52,7 @@ jobs:
             git reset --hard origin/master
             
             echo "Installing dependencies & building..."
-            npm ci
+            npm install
             npm run build
             
             echo "Reloading application with PM2..."
