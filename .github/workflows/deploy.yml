@@ -44,6 +44,12 @@ jobs:
           port: ${{ secrets.ORACLE_VM_PORT || 22 }}
           script: |
             set -e
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            [ -s "$HOME/.profile" ] && source "$HOME/.profile" || true
+            [ -s "$HOME/.bashrc" ] && source "$HOME/.bashrc" || true
+            export PATH=$PATH:/usr/local/bin:/usr/bin:$NVM_DIR/versions/node/$(ls $NVM_DIR/versions/node 2>/dev/null | tail -n 1)/bin
+            
             APP_DIR="${{ secrets.ORACLE_VM_APP_DIR || '/home/ubuntu/spendly-service' }}"
             
             echo "Pulling latest code on Oracle Cloud VM..."
