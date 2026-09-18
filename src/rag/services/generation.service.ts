@@ -58,8 +58,9 @@ export class GenerationService {
 
     const fullContext = combinedContextParts.join('\n\n====================\n\n');
 
+    const modelName = this.config.get<string>('GEMINI_MODEL', 'gemini-2.0-flash');
     const model = this.genAI.getGenerativeModel({
-      model: 'gemini-3.6-flash',
+      model: modelName,
       systemInstruction: SYSTEM_PROMPT,
     });
 
@@ -94,7 +95,7 @@ export class GenerationService {
       const isRateLimit = err.status === 429 || err.message?.includes('429') || err.message?.includes('Quota exceeded');
       if (isRateLimit) {
         return {
-          answer: `⚠️ **Gemini AI Rate Limit Reached (HTTP 429)**\n\nThe free tier quota for \`gemini-3.6-flash\` (20 requests/day on current key) has been reached.\n\nTo restore full AI reasoning and dynamic calculations, please update your \`GEMINI_API_KEY\` in \`.env\` with a fresh API key from [Google AI Studio](https://aistudio.google.com/app/apikey).\n\n---\n\n### Your Raw Financial Data (from Database):\n\n${personalContext}`,
+          answer: `⚠️ **Gemini AI Rate Limit Reached (HTTP 429)**\n\nThe free tier quota for \`${modelName}\` has been reached for today on your current API key.\n\nTo restore full AI reasoning, please update your \`GEMINI_API_KEY\` in \`.env\` with a fresh API key from [Google AI Studio](https://aistudio.google.com/app/apikey).\n\n---\n\n### Your Raw Financial Data (from Database):\n\n${personalContext}`,
           sources: [],
           grounded: false,
         };
