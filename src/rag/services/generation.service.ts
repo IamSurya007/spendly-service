@@ -144,6 +144,7 @@ export class GenerationService {
   }
 
   private async generateWithGroq(prompt: string, groqApiKey: string): Promise<string> {
+    const groqModel = this.config.get<string>('GROQ_MODEL', 'openai/gpt-oss-120b');
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -151,7 +152,7 @@ export class GenerationService {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: groqModel,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: prompt },
