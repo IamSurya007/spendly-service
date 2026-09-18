@@ -90,9 +90,19 @@ export class GenerationService {
       return { answer: answerText, sources, grounded: true };
     } catch (err: any) {
       console.error('[GenerationService] Gemini generateContent failed:', err);
+
+      const isRateLimit = err.status === 429 || err.message?.includes('429') || err.message?.includes('Quota exceeded');
+      if (isRateLimit) {
+        return {
+          answer: `⚠️ **Gemini AI Rate Limit Reached (HTTP 429)**\n\nThe free tier quota for \`gemini-3.6-flash\` (20 requests/day on current key) has been reached.\n\nTo restore full AI reasoning and dynamic calculations, please update your \`GEMINI_API_KEY\` in \`.env\` with a fresh API key from [Google AI Studio](https://aistudio.google.com/app/apikey).\n\n---\n\n### Your Raw Financial Data (from Database):\n\n${personalContext}`,
+          sources: [],
+          grounded: false,
+        };
+      }
+
       if (personalContext && /spend|expense|average|loan|debt|sip/i.test(question)) {
         return {
-          answer: `Based on your records in the database, here is your summary:\n\n${personalContext}`,
+          answer: `⚠️ **AI Generation Unavailable (${err.message || 'Service Error'})**\n\nHere is your current financial summary retrieved from your database:\n\n${personalContext}`,
           sources: [],
           grounded: true,
         };
