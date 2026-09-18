@@ -1,20 +1,22 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SearchHit } from './vector-store.service';
 import { AskResponseDto, SourceRef } from '../dto/ask.dto';
 import { ExpensesService } from '../../expenses/expenses.service';
+import { LoansService } from '../../loans/loans.service';
+import { InvestmentsService } from '../../investments/investments.service';
 
 const SYSTEM_PROMPT = `You are Spendly's intelligent AI financial advisor.
 You have access to two sources of context:
-1. User Live Personal Financial Records (from PostgreSQL database: actual user expenses, monthly totals, category breakdowns, averages).
-2. Curated Financial Knowledge Base (educational guides, loan policies, budgeting rules).
+1. User Live Personal Financial Records (from PostgreSQL database: actual user expenses, monthly totals, category breakdowns, active loans/debts owed, investments, and net positions).
+2. Curated Financial Knowledge Base (educational guides, loan policies, budgeting rules, debt repayment strategies).
 
 Rules:
-- If the question is about personal spending, monthly averages, expenses, or budgets, use the User Live Personal Financial Records context. State numbers clearly with rupee symbols (₹) and monthly breakdowns.
-- If the question is an educational or concept query (e.g. 50/30/20 rule, emergency funds, debt snowball), use the Knowledge Base context excerpts and reference sources by their [number].
-- If the context doesn't contain enough information to answer, state so plainly and suggest relevant questions.
-- Be clear, practical, helpful, and concise.`;
+- If the question is about personal spending, debt position, loans owed, SIP/investment growth, or monthly budget clearance plans, use the User Live Personal Financial Records context and calculate realistic projections or plans based on their numbers. State all numbers clearly with rupee symbols (₹).
+- If the question is an educational or concept query (e.g. 50/30/20 rule, emergency funds, debt snowball vs avalanche), use the Knowledge Base context excerpts and reference sources by their [number].
+- If specific numbers (like loan balance) are zero or missing in personal context, state that no active debt is registered in the database, then provide a clear hypothetical breakdown (e.g., formulas for clearing a target debt in 1 year, and SIP future value calculations over 4-5 years assuming standard 12% p.a. equity mutual fund CAGR).
+- Be practical, highly structured, clear, and encouraging.`;
 
 @Injectable()
 export class GenerationService {
@@ -23,6 +25,8 @@ export class GenerationService {
   constructor(
     private readonly config: ConfigService,
     private readonly expensesService: ExpensesService,
+    @Optional() private readonly loansService?: LoansService,
+    @Optional() private readonly investmentsService?: InvestmentsService,
   ) {
     const apiKey = this.config.get<string>('GEMINI_API_KEY') || '';
     this.genAI = new GoogleGenerativeAI(apiKey);
@@ -62,15 +66,31 @@ export class GenerationService {
     const prompt = `Provided Context:\n\n${fullContext}\n\nUser Question: ${question}\n\nAnswer the question directly using the provided context above.`;
 
     try {
-      const result = await model.generateContent(prompt);
-      const answer = result.response.text();
-      const sources: SourceRef[] = this.dedupeSources(hits);
+      let answerText = '';
+      let attempts = 0;
+      const maxAttempts = 3;
 
-      return { answer, sources, grounded: true };
+      while (attempts < maxAttempts) {
+        try {
+          attempts++;
+          const result = await model.generateContent(prompt);
+          answerText = result.response.text();
+          break;
+        } catch (err: any) {
+          if ((err.status === 503 || err.message?.includes('503')) && attempts < maxAttempts) {
+            console.warn(`[GenerationService] Gemini API 503 on attempt ${attempts}/${maxAttempts}, retrying in 1.5s...`);
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+          } else {
+            throw err;
+          }
+        }
+      }
+
+      const sources: SourceRef[] = this.dedupeSources(hits);
+      return { answer: answerText, sources, grounded: true };
     } catch (err: any) {
       console.error('[GenerationService] Gemini generateContent failed:', err);
-      // Fallback response if AI generation fails
-      if (personalContext && /spend|expense|average/i.test(question)) {
+      if (personalContext && /spend|expense|average|loan|debt|sip/i.test(question)) {
         return {
           answer: `Based on your records in the database, here is your summary:\n\n${personalContext}`,
           sources: [],
@@ -99,29 +119,52 @@ export class GenerationService {
         (s): s is NonNullable<typeof s> => s !== null && s.totalExpenses > 0
       );
 
-      if (validSummaries.length === 0) {
-        return 'User Live Personal Financial Records: No positive expense records found in database.';
+      const loansSummary = this.loansService
+        ? await this.loansService.getSummary(userId).catch(() => null)
+        : null;
+
+      const investmentsSummary = this.investmentsService
+        ? await this.investmentsService.getSummary(userId).catch(() => null)
+        : null;
+
+      let contextStr = `[User Live Personal Financial Records from PostgreSQL Database]\n`;
+
+      if (validSummaries.length > 0) {
+        let totalSpendSum = 0;
+        const lines: string[] = [];
+        for (const s of validSummaries) {
+          totalSpendSum += s.totalExpenses;
+          const topCats = (s.byCategory || [])
+            .sort((a, b) => b.total - a.total)
+            .slice(0, 4)
+            .map((c) => `${c.category}: ₹${Math.round(c.total).toLocaleString('en-IN')}`)
+            .join(', ');
+
+          lines.push(
+            `- ${s.month}: Total Spend ₹${Math.round(s.totalExpenses).toLocaleString('en-IN')} (Top Categories: ${topCats || 'None'})`
+          );
+        }
+        const avgMonthlySpend = Math.round(totalSpendSum / validSummaries.length);
+        contextStr += `Expenses Summary:\n- Overall 3-Month Average Spend: ₹${avgMonthlySpend.toLocaleString('en-IN')}/month\n- Monthly Breakdowns:\n${lines.join('\n')}\n`;
+      } else {
+        contextStr += `Expenses Summary: No positive expense records found in database.\n`;
       }
 
-      let totalSpendSum = 0;
-      const lines: string[] = [];
-
-      for (const s of validSummaries) {
-        totalSpendSum += s.totalExpenses;
-        const topCats = (s.byCategory || [])
-          .sort((a, b) => b.total - a.total)
-          .slice(0, 4)
-          .map((c) => `${c.category}: ₹${Math.round(c.total).toLocaleString('en-IN')}`)
-          .join(', ');
-
-        lines.push(
-          `- ${s.month}: Total Spend ₹${Math.round(s.totalExpenses).toLocaleString('en-IN')} (Top Categories: ${topCats || 'None'})`
-        );
+      if (loansSummary) {
+        contextStr += `Loans & Debt Position:\n- Total Debt Owed (Loans Taken): ₹${Math.round(loansSummary.totalOwed).toLocaleString('en-IN')}\n- Total Receivables (Loans Given): ₹${Math.round(loansSummary.totalToReceive).toLocaleString('en-IN')}\n- Net Position: ₹${Math.round(loansSummary.netPosition).toLocaleString('en-IN')}\n`;
+        if (loansSummary.upcomingRepayments && loansSummary.upcomingRepayments.length > 0) {
+          const list = loansSummary.upcomingRepayments
+            .map((r) => `  * ${r.name} (${r.type}): ₹${r.total.toLocaleString('en-IN')} due on ${r.repaymentDate}`)
+            .join('\n');
+          contextStr += `Upcoming Loan Repayments:\n${list}\n`;
+        }
       }
 
-      const avgMonthlySpend = Math.round(totalSpendSum / validSummaries.length);
+      if (investmentsSummary) {
+        contextStr += `Investments Summary:\n- Total Invested: ₹${Math.round(investmentsSummary.totalInvested).toLocaleString('en-IN')}\n- Total Expected Maturity Value: ₹${Math.round(investmentsSummary.totalMaturityValue).toLocaleString('en-IN')}\n`;
+      }
 
-      return `[User Live Personal Financial Records from PostgreSQL Database]\nUser ID: ${userId}\nOverall 3-Month Average Spend: ₹${avgMonthlySpend.toLocaleString('en-IN')}/month\nMonthly Breakdowns:\n${lines.join('\n')}`;
+      return contextStr;
     } catch (err: any) {
       console.warn('[GenerationService] Failed to load personal financial context:', err.message);
       return '';

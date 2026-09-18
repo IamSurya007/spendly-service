@@ -13,12 +13,16 @@ import { IngestionProcessor, INGESTION_QUEUE } from './queue/ingestion.processor
 import { UsersModule } from '../users/users.module';
 import { AuthModule } from '../auth/auth.module';
 import { ExpensesModule } from '../expenses/expenses.module';
+import { LoansModule } from '../loans/loans.module';
+import { InvestmentsModule } from '../investments/investments.module';
 
 @Module({
   imports: [
     UsersModule,
     AuthModule,
     ExpensesModule,
+    LoansModule,
+    InvestmentsModule,
     BullModule.registerQueueAsync({
       name: INGESTION_QUEUE,
       imports: [ConfigModule],
