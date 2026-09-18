@@ -57,13 +57,25 @@ export class GenerationService {
     }
 
     const fullContext = combinedContextParts.join('\n\n====================\n\n');
-    const modelName = this.config.get<string>('GEMINI_MODEL', 'gemini-3.6-flash');
     const prompt = `Provided Context:\n\n${fullContext}\n\nUser Question: ${question}\n\nAnswer the question directly using the provided context above.`;
 
     const groqApiKey = this.config.get<string>('GROQ_API_KEY');
+    const preferredProvider = this.config.get<string>('PREFERRED_AI_PROVIDER', groqApiKey ? 'groq' : 'gemini');
 
-    // Attempt 1: Gemini AI
+    // Scenario 1: Prefer Groq
+    if (preferredProvider === 'groq' && groqApiKey) {
+      try {
+        const groqAnswer = await this.generateWithGroq(prompt, groqApiKey);
+        const sources: SourceRef[] = this.dedupeSources(hits);
+        return { answer: groqAnswer, sources, grounded: true };
+      } catch (groqErr: any) {
+        console.warn(`[GenerationService] Primary Groq generation failed (${groqErr.message}). Falling back to Gemini...`);
+      }
+    }
+
+    // Scenario 2: Gemini (Primary or Fallback)
     try {
+      const modelName = this.config.get<string>('GEMINI_MODEL', 'gemini-3.6-flash');
       const model = this.genAI.getGenerativeModel({
         model: modelName,
         systemInstruction: SYSTEM_PROMPT,
@@ -92,20 +104,19 @@ export class GenerationService {
       const sources: SourceRef[] = this.dedupeSources(hits);
       return { answer: answerText, sources, grounded: true };
     } catch (geminiErr: any) {
-      console.warn(`[GenerationService] Gemini generation failed (${geminiErr.message}). Checking Groq fallback...`);
+      console.warn(`[GenerationService] Gemini generation failed (${geminiErr.message}). Checking secondary Groq...`);
 
-      // Attempt 2: Groq Fallback (if GROQ_API_KEY is provided)
-      if (groqApiKey) {
+      // Fallback to Groq if Gemini failed and it wasn't tried as primary
+      if (preferredProvider !== 'groq' && groqApiKey) {
         try {
           const groqAnswer = await this.generateWithGroq(prompt, groqApiKey);
           const sources: SourceRef[] = this.dedupeSources(hits);
           return { answer: groqAnswer, sources, grounded: true };
         } catch (groqErr: any) {
-          console.error('[GenerationService] Groq fallback also failed:', groqErr.message);
+          console.error('[GenerationService] Secondary Groq fallback also failed:', groqErr.message);
         }
       }
 
-      // Graceful error reporting if both fail or rate limit reached
       const isRateLimit =
         geminiErr.status === 429 ||
         geminiErr.message?.includes('429') ||
@@ -113,7 +124,7 @@ export class GenerationService {
 
       if (isRateLimit) {
         return {
-          answer: `⚠️ **Gemini AI Rate Limit Reached (HTTP 429)**\n\nThe free tier quota for \`${modelName}\` has been reached on this API key.\n\n**Quick Fixes:**\n1. Update \`GEMINI_API_KEY\` in \`.env\` with a new key from [Google AI Studio](https://aistudio.google.com/app/apikey).\n2. **Alternative (14,400 Free Requests/Day)**: Add \`GROQ_API_KEY=gsk_...\` in \`.env\` from [Groq Console](https://console.groq.com) for unlimited instant fallback!\n\n---\n\n### Your Financial Data from Database:\n\n${personalContext}`,
+          answer: `⚠️ **Gemini AI Rate Limit Reached (HTTP 429)**\n\nYour Gemini daily quota has been reached.\n\n**Quick Fix:** Add \`GROQ_API_KEY=gsk_...\` in \`.env\` from [Groq Console](https://console.groq.com) for 14,400 free requests/day!\n\n---\n\n### Your Financial Data from Database:\n\n${personalContext}`,
           sources: [],
           grounded: false,
         };
@@ -121,7 +132,7 @@ export class GenerationService {
 
       if (personalContext && /spend|expense|average|loan|debt|sip/i.test(question)) {
         return {
-          answer: `⚠️ **AI Generation Service Notice (${geminiErr.message || 'Error'})**\n\nHere is your current financial summary retrieved from your database:\n\n${personalContext}`,
+          answer: `⚠️ **AI Generation Notice (${geminiErr.message || 'Error'})**\n\nHere is your current financial summary retrieved from your database:\n\n${personalContext}`,
           sources: [],
           grounded: true,
         };
