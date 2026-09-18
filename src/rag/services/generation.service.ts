@@ -59,7 +59,8 @@ export class GenerationService {
     const fullContext = combinedContextParts.join('\n\n====================\n\n');
     const prompt = `Provided Context:\n\n${fullContext}\n\nUser Question: ${question}\n\nAnswer the question directly using the provided context above.`;
 
-    const groqApiKey = this.config.get<string>('GROQ_API_KEY');
+    const rawGroqKey = this.config.get<string>('GROQ_API_KEY') || process.env.GROQ_API_KEY;
+    const groqApiKey = rawGroqKey ? rawGroqKey.replace(/^["']|["']$/g, '').trim() : undefined;
     const preferredProvider = this.config.get<string>('PREFERRED_AI_PROVIDER', groqApiKey ? 'groq' : 'gemini');
 
     // Scenario 1: Prefer Groq
