@@ -1,4 +1,4 @@
-import { Injectable, Optional, Inject } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SearchHit } from './vector-store.service';
@@ -57,19 +57,21 @@ export class GenerationService {
     }
 
     const fullContext = combinedContextParts.join('\n\n====================\n\n');
-
-    const modelName = this.config.get<string>('GEMINI_MODEL', 'gemini-2.0-flash');
-    const model = this.genAI.getGenerativeModel({
-      model: modelName,
-      systemInstruction: SYSTEM_PROMPT,
-    });
-
+    const modelName = this.config.get<string>('GEMINI_MODEL', 'gemini-3.6-flash');
     const prompt = `Provided Context:\n\n${fullContext}\n\nUser Question: ${question}\n\nAnswer the question directly using the provided context above.`;
 
+    const groqApiKey = this.config.get<string>('GROQ_API_KEY');
+
+    // Attempt 1: Gemini AI
     try {
+      const model = this.genAI.getGenerativeModel({
+        model: modelName,
+        systemInstruction: SYSTEM_PROMPT,
+      });
+
       let answerText = '';
       let attempts = 0;
-      const maxAttempts = 3;
+      const maxAttempts = 2;
 
       while (attempts < maxAttempts) {
         try {
@@ -79,7 +81,7 @@ export class GenerationService {
           break;
         } catch (err: any) {
           if ((err.status === 503 || err.message?.includes('503')) && attempts < maxAttempts) {
-            console.warn(`[GenerationService] Gemini API 503 on attempt ${attempts}/${maxAttempts}, retrying in 1.5s...`);
+            console.warn(`[GenerationService] Gemini API 503 on attempt ${attempts}/${maxAttempts}, retrying...`);
             await new Promise((resolve) => setTimeout(resolve, 1500));
           } else {
             throw err;
@@ -89,13 +91,29 @@ export class GenerationService {
 
       const sources: SourceRef[] = this.dedupeSources(hits);
       return { answer: answerText, sources, grounded: true };
-    } catch (err: any) {
-      console.error('[GenerationService] Gemini generateContent failed:', err);
+    } catch (geminiErr: any) {
+      console.warn(`[GenerationService] Gemini generation failed (${geminiErr.message}). Checking Groq fallback...`);
 
-      const isRateLimit = err.status === 429 || err.message?.includes('429') || err.message?.includes('Quota exceeded');
+      // Attempt 2: Groq Fallback (if GROQ_API_KEY is provided)
+      if (groqApiKey) {
+        try {
+          const groqAnswer = await this.generateWithGroq(prompt, groqApiKey);
+          const sources: SourceRef[] = this.dedupeSources(hits);
+          return { answer: groqAnswer, sources, grounded: true };
+        } catch (groqErr: any) {
+          console.error('[GenerationService] Groq fallback also failed:', groqErr.message);
+        }
+      }
+
+      // Graceful error reporting if both fail or rate limit reached
+      const isRateLimit =
+        geminiErr.status === 429 ||
+        geminiErr.message?.includes('429') ||
+        geminiErr.message?.includes('Quota exceeded');
+
       if (isRateLimit) {
         return {
-          answer: `⚠️ **Gemini AI Rate Limit Reached (HTTP 429)**\n\nThe free tier quota for \`${modelName}\` has been reached for today on your current API key.\n\nTo restore full AI reasoning, please update your \`GEMINI_API_KEY\` in \`.env\` with a fresh API key from [Google AI Studio](https://aistudio.google.com/app/apikey).\n\n---\n\n### Your Raw Financial Data (from Database):\n\n${personalContext}`,
+          answer: `⚠️ **Gemini AI Rate Limit Reached (HTTP 429)**\n\nThe free tier quota for \`${modelName}\` has been reached on this API key.\n\n**Quick Fixes:**\n1. Update \`GEMINI_API_KEY\` in \`.env\` with a new key from [Google AI Studio](https://aistudio.google.com/app/apikey).\n2. **Alternative (14,400 Free Requests/Day)**: Add \`GROQ_API_KEY=gsk_...\` in \`.env\` from [Groq Console](https://console.groq.com) for unlimited instant fallback!\n\n---\n\n### Your Financial Data from Database:\n\n${personalContext}`,
           sources: [],
           grounded: false,
         };
@@ -103,13 +121,40 @@ export class GenerationService {
 
       if (personalContext && /spend|expense|average|loan|debt|sip/i.test(question)) {
         return {
-          answer: `⚠️ **AI Generation Unavailable (${err.message || 'Service Error'})**\n\nHere is your current financial summary retrieved from your database:\n\n${personalContext}`,
+          answer: `⚠️ **AI Generation Service Notice (${geminiErr.message || 'Error'})**\n\nHere is your current financial summary retrieved from your database:\n\n${personalContext}`,
           sources: [],
           grounded: true,
         };
       }
-      throw err;
+
+      throw geminiErr;
     }
+  }
+
+  private async generateWithGroq(prompt: string, groqApiKey: string): Promise<string> {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${groqApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.3,
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Groq API error ${res.status}: ${errText}`);
+    }
+
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content || 'No response generated from Groq.';
   }
 
   private async getPersonalFinancialContext(userId: string): Promise<string> {
