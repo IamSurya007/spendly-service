@@ -25,6 +25,12 @@ export class CategoryRule {
   category: string;
 
   @Column({ type: 'varchar', nullable: true })
+  categoryId: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  subcategoryId: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
   @Index()
   clientId: string | null;
 

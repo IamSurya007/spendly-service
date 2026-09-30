@@ -17,6 +17,12 @@ export class UpdateLoanDto {
   @Min(0.01)
   principal?: number;
 
+  /** Annual interest rate in percent. */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  interestRate?: number;
+
   @IsOptional()
   @IsNumber()
   @Min(0.01)

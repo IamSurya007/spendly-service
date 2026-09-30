@@ -23,7 +23,7 @@ export class LoansService {
   }
 
   async findAll(userId: string, type?: LoanType, status?: LoanStatus): Promise<Loan[]> {
-    const where: any = { userId };
+    const where: any = { userId, isDeleted: false };
     if (type) {
       where.type = type;
     }
@@ -59,19 +59,26 @@ export class LoansService {
     }
     if (dto.status !== undefined) loan.status = dto.status;
     if (dto.notes !== undefined) loan.notes = dto.notes;
+    if (dto.interestRate !== undefined) loan.interestRate = dto.interestRate;
+    // Bump the version so offline clients accept this edit on their next pull.
+    loan.version = (loan.version || 1) + 1;
 
     return this.loansRepository.save(loan);
   }
 
   async remove(userId: string, id: string): Promise<void> {
     const loan = await this.findOne(userId, id);
-    await this.loansRepository.remove(loan);
+    // Soft delete so the mobile app receives a tombstone on its next pull.
+    loan.isDeleted = true;
+    loan.version = (loan.version || 1) + 1;
+    await this.loansRepository.save(loan);
   }
 
   async getSummary(userId: string) {
     const activeLoans = await this.loansRepository.find({
       where: {
         userId,
+        isDeleted: false,
         status: Not(LoanStatus.PAID),
       },
     });

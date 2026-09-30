@@ -46,7 +46,7 @@ export class InvestmentsService {
 
   async findAll(userId: string): Promise<Investment[]> {
     return this.investmentsRepository.find({
-      where: { userId },
+      where: { userId, isDeleted: false },
       order: { createdAt: 'DESC' },
     });
   }
@@ -73,6 +73,7 @@ export class InvestmentsService {
     if (dto.startDate !== undefined) investment.startDate = new Date(dto.startDate);
     if (dto.maturityDate !== undefined) investment.maturityDate = new Date(dto.maturityDate);
     if (dto.institution !== undefined) investment.institution = dto.institution;
+    if (dto.interestRate !== undefined) investment.interestRate = dto.interestRate;
 
     // Recalculate maturity amount if inputs changed and maturityAmount is not override in update request
     const inputsChangedForCalculation =
@@ -83,21 +84,26 @@ export class InvestmentsService {
     } else if (inputsChangedForCalculation) {
       const monthlyAmount = dto.monthlyAmount ?? investment.monthlyAmount;
       const durationMonths = dto.durationMonths ?? investment.durationMonths;
-      const interestRate = dto.interestRate ?? 6.5;
+      const interestRate = dto.interestRate ?? (investment.interestRate || 6.5);
       investment.maturityAmount = this.calculateRDMaturity(monthlyAmount, interestRate, durationMonths);
     }
+    // Bump the version so offline clients accept this edit on their next pull.
+    investment.version = (investment.version || 1) + 1;
 
     return this.investmentsRepository.save(investment);
   }
 
   async remove(userId: string, id: string): Promise<void> {
     const investment = await this.findOne(userId, id);
-    await this.investmentsRepository.remove(investment);
+    // Soft delete so the mobile app receives a tombstone on its next pull.
+    investment.isDeleted = true;
+    investment.version = (investment.version || 1) + 1;
+    await this.investmentsRepository.save(investment);
   }
 
   async getSummary(userId: string) {
     const investments = await this.investmentsRepository.find({
-      where: { userId },
+      where: { userId, isDeleted: false },
     });
 
     const totalInvested = investments.reduce((sum, inv) => sum + inv.principal, 0);

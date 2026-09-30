@@ -1,0 +1,310 @@
+{
+  "version": 1,
+  "_comment": "Single source of truth for the system category taxonomy. Edit this file, then run `node shared/generate-categories.mjs` to regenerate the Flutter, backend and web copies. Icon keys are Phosphor icon names (https://phosphoricons.com). Never change or reuse an existing id: expenses, budgets and rules reference them.",
+  "categories": [
+    {
+      "id": "food", "name": "Food & Drinks", "icon": "fork-knife", "color": "#F97316", "kind": "expense",
+      "children": [
+        { "id": "food.restaurants", "name": "Restaurants", "icon": "fork-knife" },
+        { "id": "food.delivery", "name": "Food Delivery", "icon": "moped" },
+        { "id": "food.cafe", "name": "Coffee & Snacks", "icon": "coffee" },
+        { "id": "food.drinks", "name": "Bars & Drinks", "icon": "beer-stein" }
+      ]
+    },
+    {
+      "id": "groceries", "name": "Groceries", "icon": "shopping-cart", "color": "#22C55E", "kind": "expense",
+      "children": [
+        { "id": "groceries.supermarket", "name": "Supermarket", "icon": "storefront" },
+        { "id": "groceries.quick", "name": "Quick Commerce", "icon": "lightning" },
+        { "id": "groceries.produce", "name": "Fruits & Vegetables", "icon": "carrot" },
+        { "id": "groceries.dairy", "name": "Milk & Dairy", "icon": "egg" }
+      ]
+    },
+    {
+      "id": "housing", "name": "Housing", "icon": "house", "color": "#8B5CF6", "kind": "expense",
+      "children": [
+        { "id": "housing.rent", "name": "Rent", "icon": "house-line" },
+        { "id": "housing.maintenance", "name": "Maintenance", "icon": "wrench" },
+        { "id": "housing.decor", "name": "Home Decor", "icon": "armchair" },
+        { "id": "housing.help", "name": "House Help", "icon": "broom" }
+      ]
+    },
+    {
+      "id": "bills", "name": "Bills & Utilities", "icon": "receipt", "color": "#0EA5E9", "kind": "expense",
+      "children": [
+        { "id": "bills.electricity", "name": "Electricity", "icon": "lightning" },
+        { "id": "bills.water", "name": "Water", "icon": "drop" },
+        { "id": "bills.gas", "name": "Gas", "icon": "flame" },
+        { "id": "bills.internet", "name": "Internet", "icon": "wifi-high" },
+        { "id": "bills.mobile", "name": "Mobile Recharge", "icon": "device-mobile" },
+        { "id": "bills.dth", "name": "DTH / Cable", "icon": "television" }
+      ]
+    },
+    {
+      "id": "transport", "name": "Transport", "icon": "car", "color": "#3B82F6", "kind": "expense",
+      "children": [
+        { "id": "transport.fuel", "name": "Fuel", "icon": "gas-pump" },
+        { "id": "transport.cab", "name": "Cab & Auto", "icon": "taxi" },
+        { "id": "transport.public", "name": "Public Transport", "icon": "bus" },
+        { "id": "transport.parking", "name": "Parking & Tolls", "icon": "road-horizon" },
+        { "id": "transport.service", "name": "Vehicle Service", "icon": "wrench" }
+      ]
+    },
+    {
+      "id": "shopping", "name": "Shopping", "icon": "shopping-bag", "color": "#EC4899", "kind": "expense",
+      "children": [
+        { "id": "shopping.clothing", "name": "Clothing", "icon": "t-shirt" },
+        { "id": "shopping.electronics", "name": "Electronics", "icon": "device-mobile" },
+        { "id": "shopping.online", "name": "Online Shopping", "icon": "package" },
+        { "id": "shopping.accessories", "name": "Accessories", "icon": "watch" }
+      ]
+    },
+    {
+      "id": "health", "name": "Health", "icon": "heartbeat", "color": "#EF4444", "kind": "expense",
+      "children": [
+        { "id": "health.doctor", "name": "Doctor", "icon": "stethoscope" },
+        { "id": "health.medicines", "name": "Medicines", "icon": "pill" },
+        { "id": "health.lab", "name": "Lab Tests", "icon": "flask" },
+        { "id": "health.fitness", "name": "Gym & Fitness", "icon": "barbell" }
+      ]
+    },
+    {
+      "id": "personal", "name": "Personal Care", "icon": "sparkle", "color": "#D946EF", "kind": "expense",
+      "children": [
+        { "id": "personal.grooming", "name": "Salon & Grooming", "icon": "scissors" },
+        { "id": "personal.products", "name": "Care Products", "icon": "hand-soap" }
+      ]
+    },
+    {
+      "id": "entertainment", "name": "Entertainment", "icon": "film-slate", "color": "#F59E0B", "kind": "expense",
+      "children": [
+        { "id": "entertainment.subscriptions", "name": "Subscriptions", "icon": "play-circle" },
+        { "id": "entertainment.movies", "name": "Movies", "icon": "film-strip" },
+        { "id": "entertainment.gaming", "name": "Gaming", "icon": "game-controller" },
+        { "id": "entertainment.events", "name": "Events & Concerts", "icon": "ticket" }
+      ]
+    },
+    {
+      "id": "travel", "name": "Travel", "icon": "airplane-tilt", "color": "#06B6D4", "kind": "expense",
+      "children": [
+        { "id": "travel.flights", "name": "Flights", "icon": "airplane-takeoff" },
+        { "id": "travel.stays", "name": "Hotels & Stays", "icon": "bed" },
+        { "id": "travel.trains", "name": "Trains & Buses", "icon": "train" },
+        { "id": "travel.trips", "name": "Trips & Holidays", "icon": "suitcase-rolling" }
+      ]
+    },
+    {
+      "id": "education", "name": "Education", "icon": "graduation-cap", "color": "#6366F1", "kind": "expense",
+      "children": [
+        { "id": "education.courses", "name": "Courses", "icon": "chalkboard-teacher" },
+        { "id": "education.books", "name": "Books", "icon": "book-open" },
+        { "id": "education.tuition", "name": "Fees & Tuition", "icon": "student" }
+      ]
+    },
+    {
+      "id": "family", "name": "Family & Friends", "icon": "users-three", "color": "#F43F5E", "kind": "expense",
+      "children": [
+        { "id": "family.family", "name": "Family", "icon": "house-simple" },
+        { "id": "family.friends", "name": "Friends", "icon": "users" },
+        { "id": "family.gifts", "name": "Gifts", "icon": "gift" },
+        { "id": "family.donations", "name": "Donations", "icon": "hand-heart" },
+        { "id": "family.occasions", "name": "Weddings & Occasions", "icon": "confetti" },
+        { "id": "family.pets", "name": "Pets", "icon": "paw-print" }
+      ]
+    },
+    {
+      "id": "finance", "name": "Loans & Bills", "icon": "bank", "color": "#64748B", "kind": "expense",
+      "children": [
+        { "id": "finance.cc_bill", "name": "Credit Card Bill", "icon": "credit-card" },
+        { "id": "finance.loan_emi", "name": "Loan EMI", "icon": "bank" },
+        { "id": "finance.vehicle_emi", "name": "Vehicle EMI", "icon": "motorcycle" },
+        { "id": "finance.insurance", "name": "Insurance", "icon": "shield-check" },
+        { "id": "finance.tax", "name": "Taxes", "icon": "receipt" },
+        { "id": "finance.charges", "name": "Bank Charges", "icon": "percent" }
+      ]
+    },
+    {
+      "id": "investments", "name": "Investments & Savings", "icon": "chart-line-up", "color": "#10B981", "kind": "expense",
+      "children": [
+        { "id": "investments.sip", "name": "SIP / RD", "icon": "chart-line-up" },
+        { "id": "investments.stocks", "name": "Stocks", "icon": "trend-up" },
+        { "id": "investments.chitti", "name": "Chitti / Savings Group", "icon": "users-four" },
+        { "id": "investments.gold", "name": "Gold", "icon": "coins" }
+      ]
+    },
+    {
+      "id": "transfers", "name": "Transfers", "icon": "arrows-left-right", "color": "#94A3B8", "kind": "transfer",
+      "children": [
+        { "id": "transfers.self", "name": "Self Transfer", "icon": "arrows-clockwise" },
+        { "id": "transfers.splitwise", "name": "Splitwise", "icon": "arrows-split" },
+        { "id": "transfers.cash", "name": "Cash Withdrawal", "icon": "money" },
+        { "id": "transfers.people", "name": "Sent to People", "icon": "paper-plane-tilt" }
+      ]
+    },
+    {
+      "id": "work", "name": "Work", "icon": "briefcase", "color": "#A16207", "kind": "expense",
+      "children": [
+        { "id": "work.office", "name": "Office Expenses", "icon": "briefcase" },
+        { "id": "work.reimbursable", "name": "Reimbursable", "icon": "hand-coins" }
+      ]
+    },
+    {
+      "id": "income", "name": "Income", "icon": "hand-coins", "color": "#16A34A", "kind": "income",
+      "children": [
+        { "id": "income.salary", "name": "Salary", "icon": "money" },
+        { "id": "income.freelance", "name": "Freelance", "icon": "laptop" },
+        { "id": "income.refund", "name": "Refunds", "icon": "arrow-u-up-left" },
+        { "id": "income.cashback", "name": "Cashback & Rewards", "icon": "gift" },
+        { "id": "income.interest", "name": "Interest & Dividends", "icon": "percent" },
+        { "id": "income.received", "name": "Received from People", "icon": "hand-coins" }
+      ]
+    },
+    {
+      "id": "misc", "name": "Miscellaneous", "icon": "dots-three-circle", "color": "#9CA3AF", "kind": "expense",
+      "children": []
+    }
+  ],
+
+  "defaults": {
+    "debit": "misc",
+    "credit": "income"
+  },
+
+  "_legacyComment": "Old free-text category names (mobile list, web list, seed data) -> [parentId, subcategoryId|null]. Matched case-insensitively. Credits whose legacy name maps to `misc` are moved to `income`.",
+  "legacy": {
+    "Rent": ["housing", "housing.rent"],
+    "PG Rent": ["housing", "housing.rent"],
+    "Electricity": ["bills", "bills.electricity"],
+    "Water Bill": ["bills", "bills.water"],
+    "Gas": ["bills", "bills.gas"],
+    "Internet": ["bills", "bills.internet"],
+    "Maintenance": ["housing", "housing.maintenance"],
+    "Groceries": ["groceries", "groceries.supermarket"],
+    "Restaurants": ["food", "food.restaurants"],
+    "Food Delivery": ["food", "food.delivery"],
+    "Coffee & Snacks": ["food", "food.cafe"],
+    "Fuel": ["transport", "transport.fuel"],
+    "Auto / Cab": ["transport", "transport.cab"],
+    "Public Transport": ["transport", "transport.public"],
+    "Vehicle EMI": ["finance", "finance.vehicle_emi"],
+    "Parking": ["transport", "transport.parking"],
+    "Flight": ["travel", "travel.flights"],
+    "CC Bill": ["finance", "finance.cc_bill"],
+    "CC 1 Bill": ["finance", "finance.cc_bill"],
+    "Loan EMI": ["finance", "finance.loan_emi"],
+    "Insurance": ["finance", "finance.insurance"],
+    "Investment": ["investments", null],
+    "RD / SIP": ["investments", "investments.sip"],
+    "Tax": ["finance", "finance.tax"],
+    "Doctor": ["health", "health.doctor"],
+    "Medicines": ["health", "health.medicines"],
+    "Gym / Fitness": ["health", "health.fitness"],
+    "Lab Tests": ["health", "health.lab"],
+    "Clothing": ["shopping", "shopping.clothing"],
+    "Electronics": ["shopping", "shopping.electronics"],
+    "Home Decor": ["housing", "housing.decor"],
+    "Personal Care": ["personal", "personal.products"],
+    "OTT / Subscriptions": ["entertainment", "entertainment.subscriptions"],
+    "Movies": ["entertainment", "entertainment.movies"],
+    "Gaming": ["entertainment", "entertainment.gaming"],
+    "Events / Concerts": ["entertainment", "entertainment.events"],
+    "Family": ["family", "family.family"],
+    "Dad": ["family", "family.family"],
+    "Friends": ["family", "family.friends"],
+    "Gifts": ["family", "family.gifts"],
+    "Donations": ["family", "family.donations"],
+    "Marriage / Events": ["family", "family.occasions"],
+    "Courses": ["education", "education.courses"],
+    "Books": ["education", "education.books"],
+    "Tuition": ["education", "education.tuition"],
+    "Office Expenses": ["work", "work.office"],
+    "Chitti / Savings Group": ["investments", "investments.chitti"],
+    "Splitwise": ["transfers", "transfers.splitwise"],
+    "Cash Withdrawal": ["transfers", "transfers.cash"],
+    "Travel": ["travel", "travel.trips"],
+    "Pets": ["family", "family.pets"],
+    "Other": ["misc", null],
+    "Spends": ["misc", null],
+    "Uncategorized": ["misc", null],
+    "": ["misc", null],
+    "Food & Dining": ["food", null],
+    "Transport": ["transport", null],
+    "Shopping": ["shopping", null],
+    "Entertainment": ["entertainment", null],
+    "Health": ["health", null],
+    "Utilities": ["bills", null],
+    "Education": ["education", null]
+  },
+
+  "_merchantComment": "Keyword -> subcategory (or parent) id used to auto-categorise SMS merchants when the user has no rule. Matched on whole words, first match wins, so put specific keywords (hpcl) before generic ones (gas).",
+  "merchantKeywords": [
+    ["swiggy|zomato|eatsure|dominos|domino's|pizza hut|kfc|mcdonald|burger king|faasos|box8", "food.delivery"],
+    ["restaurant|dining|dhaba|biryani|cafe coffee day|hotel", "food.restaurants"],
+    ["starbucks|coffee|chai|chaayos|third wave|blue tokai|bakery", "food.cafe"],
+    ["blinkit|zepto|instamart|bbnow|swiggy instamart|flipkart minutes", "groceries.quick"],
+    ["bigbasket|jiomart|dmart|d mart|more retail|reliance fresh|grocer|grocery|supermarket|kirana|nature's basket", "groceries.supermarket"],
+    ["milk|dairy|amul|nandini|heritage|country delight|milkbasket", "groceries.dairy"],
+    ["hpcl|iocl|indian oil|bpcl|bharat petroleum|hindustan petroleum|shell|petrol|fuel|nayara", "transport.fuel"],
+    ["uber|ola|rapido|blusmart|namma yatri|cab|taxi|auto", "transport.cab"],
+    ["metro|bmtc|ksrtc|tsrtc|apsrtc|redbus|bus", "transport.public"],
+    ["irctc|railway|train", "travel.trains"],
+    ["fastag|toll|parking", "transport.parking"],
+    ["indigo|air india|vistara|akasa|spicejet|makemytrip|goibibo|cleartrip|ixigo|easemytrip", "travel.flights"],
+    ["oyo|airbnb|booking.com|agoda|treebo|fabhotels", "travel.stays"],
+    ["rent|nobroker|housing.com", "housing.rent"],
+    ["urban company|urbanclap", "housing.help"],
+    ["bescom|tneb|tata power|adani electricity|msedcl|bses|electricity|power", "bills.electricity"],
+    ["water|bwssb", "bills.water"],
+    ["indane|hp gas|bharatgas|bharat gas|gas", "bills.gas"],
+    ["act fibernet|actfibernet|airtel xstream|jiofiber|hathway|broadband|wifi|internet", "bills.internet"],
+    ["recharge|prepaid|postpaid|airtel|jio|vodafone|bsnl", "bills.mobile"],
+    ["tata play|tatasky|dish tv|sun direct|d2h", "bills.dth"],
+    ["netflix|hotstar|prime video|amazon prime|spotify|youtube premium|sonyliv|zee5|jiocinema|apple.com|google play", "entertainment.subscriptions"],
+    ["bookmyshow|pvr|inox|cinepolis|district", "entertainment.movies"],
+    ["steam|playstation|xbox|epic games", "entertainment.gaming"],
+    ["myntra|ajio|zara|h&m|uniqlo|westside|max fashion|pantaloons|lifestyle|trends", "shopping.clothing"],
+    ["croma|reliance digital|vijay sales|apple store|samsung", "shopping.electronics"],
+    ["amazon|flipkart|meesho|nykaa|tatacliq|snapdeal", "shopping.online"],
+    ["apollo pharmacy|pharmeasy|netmeds|1mg|tata 1mg|medplus|pharmacy|chemist|medical", "health.medicines"],
+    ["hospital|clinic|practo|doctor", "health.doctor"],
+    ["thyrocare|lal path|dr lal|metropolis|healthians|diagnostic", "health.lab"],
+    ["cult.fit|cultfit|gym|fitness|decathlon", "health.fitness"],
+    ["salon|barber|lakme|naturals|green trends", "personal.grooming"],
+    ["udemy|coursera|unacademy|byju|upgrad|skillshare", "education.courses"],
+    ["school|college|university|tuition|fees", "education.tuition"],
+    ["cc bill|credit card|card bill|cred|billdesk card", "finance.cc_bill"],
+    ["emi|loan|bajaj finserv|home credit", "finance.loan_emi"],
+    ["lic|insurance|policybazaar|acko|digit|star health|hdfc ergo|icici lombard", "finance.insurance"],
+    ["income tax|gst|tax", "finance.tax"],
+    ["zerodha|groww|upstox|kuvera|coin|mutual fund|sip|indmoney|paytm money", "investments.sip"],
+    ["digital gold|safegold|augmont", "investments.gold"],
+    ["splitwise", "transfers.splitwise"],
+    ["atm|cash withdrawal|withdrawn", "transfers.cash"]
+  ],
+
+  "iconPalette": [
+    "fork-knife", "moped", "coffee", "beer-stein", "pizza", "hamburger", "cake", "ice-cream", "wine",
+    "shopping-cart", "storefront", "carrot", "egg", "basket",
+    "house", "house-line", "house-simple", "wrench", "armchair", "broom", "plant", "key",
+    "receipt", "lightning", "drop", "flame", "wifi-high", "device-mobile", "television",
+    "car", "gas-pump", "taxi", "bus", "road-horizon", "motorcycle", "bicycle", "train", "boat",
+    "shopping-bag", "t-shirt", "package", "watch", "sneaker", "handbag", "eyeglasses", "diamond",
+    "heartbeat", "stethoscope", "pill", "flask", "barbell", "tooth", "first-aid",
+    "sparkle", "scissors", "hand-soap", "flower-lotus",
+    "film-slate", "play-circle", "film-strip", "game-controller", "ticket", "music-notes", "microphone-stage", "palette", "camera",
+    "airplane-tilt", "airplane-takeoff", "bed", "suitcase-rolling", "globe-hemisphere-east", "mountains", "tent", "umbrella-simple",
+    "graduation-cap", "chalkboard-teacher", "book-open", "student", "pencil-simple", "backpack",
+    "users-three", "users", "users-four", "gift", "hand-heart", "confetti", "paw-print", "baby", "heart",
+    "bank", "credit-card", "shield-check", "percent", "piggy-bank", "wallet", "vault",
+    "chart-line-up", "trend-up", "coins", "currency-inr",
+    "arrows-left-right", "arrows-clockwise", "arrows-split", "money", "paper-plane-tilt",
+    "briefcase", "hand-coins", "laptop", "desktop", "printer",
+    "arrow-u-up-left", "tag", "star", "lightbulb", "cloud", "wrench", "hammer", "dots-three-circle"
+  ],
+
+  "colorPalette": [
+    "#F97316", "#F59E0B", "#EAB308", "#84CC16", "#22C55E", "#10B981", "#14B8A6", "#06B6D4",
+    "#0EA5E9", "#3B82F6", "#6366F1", "#8B5CF6", "#A855F7", "#D946EF", "#EC4899", "#F43F5E",
+    "#EF4444", "#A16207", "#64748B", "#94A3B8"
+  ]
+}

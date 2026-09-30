@@ -9,6 +9,8 @@ import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { QueryExpenseDto } from './dto/query-expense.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AccountType } from '../database/enums';
+import { CategoriesService } from '../categories/categories.service';
+import { resolveLegacyCategory } from '../categories/category-resolver';
 
 @Injectable()
 export class ExpensesService {
@@ -20,6 +22,7 @@ export class ExpensesService {
     @InjectRepository(Account)
     private readonly accountsRepository: Repository<Account>,
     private readonly notificationsService: NotificationsService,
+    private readonly categoriesService: CategoriesService,
   ) {}
 
   private async validateAndGetAccountId(userId: string, accountId?: string): Promise<string> {
@@ -59,8 +62,14 @@ export class ExpensesService {
   async create(userId: string, dto: CreateExpenseDto): Promise<Expense> {
     const validAccountId = await this.validateAndGetAccountId(userId, dto.accountId);
 
+    const ids = dto.categoryId
+      ? { categoryId: dto.categoryId, subcategoryId: dto.subcategoryId ?? null }
+      : resolveLegacyCategory(dto.category, false);
+
     const expense = this.expensesRepository.create({
       ...dto,
+      categoryId: ids.categoryId,
+      subcategoryId: ids.subcategoryId,
       userId,
       accountId: validAccountId,
       isCountedAsSpend: dto.isCountedAsSpend ?? true,
@@ -70,7 +79,7 @@ export class ExpensesService {
     const savedExpense = await this.expensesRepository.save(expense);
 
     // Trigger budget check asynchronously
-    this.checkBudgetAlert(userId, dto.category, dto.date).catch(err => {
+    this.checkBudgetAlert(userId, ids.categoryId, dto.date).catch(err => {
       console.error(`Failed to check budget alert: ${err.message}`);
     });
 
@@ -84,6 +93,7 @@ export class ExpensesService {
 
     const whereConditions: any = {
       userId,
+      isDeleted: false,
       date: Between(startDate, new Date(endDate.getTime() - 1)),
     };
 
@@ -94,6 +104,12 @@ export class ExpensesService {
     if (query.source) {
       whereConditions.source = query.source;
     }
+
+    // A category id matches expenses in that category or subcategory.
+    const categoryVariants: any[] = query.categoryId
+      ? [{ categoryId: query.categoryId }, { subcategoryId: query.categoryId }]
+      : [{}];
+    const withCategory = (extra: any) => categoryVariants.map((v) => ({ ...whereConditions, ...v, ...extra }));
 
     // Apply cursor pagination if cursor is provided
     if (query.cursor) {
@@ -106,8 +122,8 @@ export class ExpensesService {
 
         return this.expensesRepository.find({
           where: [
-            { ...whereConditions, date: LessThan(cursorDate) },
-            { ...whereConditions, date: cursorDate, id: LessThan(cursorId) },
+            ...withCategory({ date: LessThan(cursorDate) }),
+            ...withCategory({ date: cursorDate, id: LessThan(cursorId) }),
           ],
           order: {
             date: 'DESC',
@@ -119,7 +135,7 @@ export class ExpensesService {
     }
 
     return this.expensesRepository.find({
-      where: whereConditions,
+      where: withCategory({}),
       order: {
         date: 'DESC',
         id: 'DESC',
@@ -148,18 +164,28 @@ export class ExpensesService {
     if (dto.isCountedAsSpend !== undefined) expense.isCountedAsSpend = dto.isCountedAsSpend;
     if (dto.amount !== undefined) expense.amount = dto.amount;
     if (dto.category !== undefined) expense.category = dto.category;
+    if (dto.categoryId !== undefined) {
+      expense.categoryId = dto.categoryId;
+      expense.subcategoryId = dto.subcategoryId ?? null;
+      expense.subcategory = dto.subcategory ?? null;
+    } else if (dto.category !== undefined) {
+      const ids = resolveLegacyCategory(dto.category, expense.amount < 0);
+      expense.categoryId = ids.categoryId;
+      expense.subcategoryId = ids.subcategoryId;
+    }
     if (dto.note !== undefined) expense.note = dto.note;
     if (dto.date !== undefined) expense.date = new Date(dto.date);
     if (dto.method !== undefined) expense.method = dto.method;
     if (dto.source !== undefined) expense.source = dto.source;
     if (dto.merchant !== undefined) expense.merchant = dto.merchant;
+    // Bump the version so offline clients accept this edit on their next pull.
+    expense.version = (expense.version || 1) + 1;
 
     const saved = await this.expensesRepository.save(expense);
 
-    if (dto.category !== undefined || dto.amount !== undefined || dto.date !== undefined || dto.isCountedAsSpend !== undefined) {
+    if (dto.category !== undefined || dto.categoryId !== undefined || dto.amount !== undefined || dto.date !== undefined || dto.isCountedAsSpend !== undefined) {
       const dateToCheck = dto.date || expense.date.toISOString();
-      const categoryToCheck = dto.category || expense.category;
-      this.checkBudgetAlert(userId, categoryToCheck, dateToCheck).catch(err => {
+      this.checkBudgetAlert(userId, expense.categoryId, dateToCheck).catch(err => {
         console.error(`Failed to check budget alert after update: ${err.message}`);
       });
     }
@@ -169,7 +195,10 @@ export class ExpensesService {
 
   async remove(userId: string, id: string): Promise<void> {
     const expense = await this.findOne(userId, id);
-    await this.expensesRepository.remove(expense);
+    // Soft delete so the mobile app receives a tombstone on its next pull.
+    expense.isDeleted = true;
+    expense.version = (expense.version || 1) + 1;
+    await this.expensesRepository.save(expense);
   }
 
   async getSummary(userId: string, month?: string) {
@@ -185,12 +214,16 @@ export class ExpensesService {
     const endDate = new Date(startDate);
     endDate.setMonth(startDate.getMonth() + 1);
 
-    const expenses = await this.expensesRepository.find({
-      where: {
-        userId,
-        date: Between(startDate, new Date(endDate.getTime() - 1)),
-      },
-    });
+    const [expenses, names] = await Promise.all([
+      this.expensesRepository.find({
+        where: {
+          userId,
+          isDeleted: false,
+          date: Between(startDate, new Date(endDate.getTime() - 1)),
+        },
+      }),
+      this.categoriesService.namesForUser(userId),
+    ]);
 
     const spendExpenses = expenses.filter(exp => exp.isCountedAsSpend !== false && exp.amount > 0);
 
@@ -199,21 +232,41 @@ export class ExpensesService {
     const totalIncome = 0;
     const balance = totalIncome - totalExpenses;
 
-    // Group by category
-    const categoryMap: { [key: string]: { total: number; count: number } } = {};
+    // Group by parent category, with a subcategory breakdown.
+    type Bucket = { total: number; count: number; subs: Map<string, { total: number; count: number }> };
+    const categoryMap = new Map<string, Bucket>();
     for (const exp of spendExpenses) {
-      if (!categoryMap[exp.category]) {
-        categoryMap[exp.category] = { total: 0, count: 0 };
+      const ids = exp.categoryId
+        ? { categoryId: exp.categoryId, subcategoryId: exp.subcategoryId }
+        : resolveLegacyCategory(exp.category, false);
+      const bucket = categoryMap.get(ids.categoryId) ?? { total: 0, count: 0, subs: new Map() };
+      bucket.total += exp.amount;
+      bucket.count += 1;
+      if (ids.subcategoryId) {
+        const sub = bucket.subs.get(ids.subcategoryId) ?? { total: 0, count: 0 };
+        sub.total += exp.amount;
+        sub.count += 1;
+        bucket.subs.set(ids.subcategoryId, sub);
       }
-      categoryMap[exp.category].total += exp.amount;
-      categoryMap[exp.category].count += 1;
+      categoryMap.set(ids.categoryId, bucket);
     }
 
-    const byCategory = Object.keys(categoryMap).map(category => ({
-      category,
-      total: categoryMap[category].total,
-      count: categoryMap[category].count,
-    }));
+    const byCategory = [...categoryMap.entries()]
+      .map(([categoryId, b]) => ({
+        category: names.name(categoryId) ?? categoryId,
+        categoryId,
+        total: b.total,
+        count: b.count,
+        subcategories: [...b.subs.entries()]
+          .map(([subcategoryId, s]) => ({
+            subcategory: names.name(subcategoryId) ?? subcategoryId,
+            subcategoryId,
+            total: s.total,
+            count: s.count,
+          }))
+          .sort((x, y) => y.total - x.total),
+      }))
+      .sort((x, y) => y.total - x.total);
 
     return {
       month: targetMonth,
@@ -224,15 +277,22 @@ export class ExpensesService {
     };
   }
 
-  private async checkBudgetAlert(userId: string, category: string, dateStr: string): Promise<void> {
+  /**
+   * Budgets are keyed by parent category id. The mobile app stores limits
+   * that apply to every month under month 'all'; a month-specific budget wins.
+   */
+  private async checkBudgetAlert(userId: string, categoryId: string | null, dateStr: string): Promise<void> {
+    if (!categoryId) return;
     const month = dateStr.substring(0, 7); // extract "YYYY-MM"
 
-    // Find budget for this category
-    const budget = await this.budgetsRepository.findOne({
-      where: { userId, month, category },
+    const budgets = await this.budgetsRepository.find({
+      where: [
+        { userId, month, category: categoryId, isDeleted: false },
+        { userId, month: 'all', category: categoryId, isDeleted: false },
+      ],
     });
-
-    if (!budget) return;
+    const budget = budgets.find(b => b.month === month) ?? budgets[0];
+    if (!budget || budget.limit <= 0) return;
 
     // Calculate total spent in this category for this month
     const startDate = new Date(`${month}-01T00:00:00.000Z`);
@@ -242,18 +302,20 @@ export class ExpensesService {
     const expenses = await this.expensesRepository.find({
       where: {
         userId,
-        category,
+        categoryId,
+        isDeleted: false,
         date: Between(startDate, new Date(endDate.getTime() - 1)),
       },
     });
 
-    const spendExpenses = expenses.filter(exp => exp.isCountedAsSpend !== false);
+    const spendExpenses = expenses.filter(exp => exp.isCountedAsSpend !== false && exp.amount > 0);
 
     const totalSpent = spendExpenses.reduce((sum, exp) => sum + exp.amount, 0);
     const percentUsed = (totalSpent / budget.limit) * 100;
 
     if (percentUsed >= 80) {
-      await this.notificationsService.sendBudgetAlert(userId, category, percentUsed);
+      const names = await this.categoriesService.namesForUser(userId);
+      await this.notificationsService.sendBudgetAlert(userId, names.name(categoryId) ?? categoryId, percentUsed);
     }
   }
 }

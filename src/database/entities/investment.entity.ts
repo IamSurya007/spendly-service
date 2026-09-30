@@ -40,6 +40,10 @@ export class Investment {
   @Column('int')
   durationMonths: number;
 
+  /** Annual interest / expected return in percent (0 when unknown). */
+  @Column('float', { default: 0 })
+  interestRate: number;
+
   @Column({ type: 'timestamp with time zone' })
   startDate: Date;
 

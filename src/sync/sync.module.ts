@@ -8,6 +8,7 @@ import { Investment } from '../database/entities/investment.entity';
 import { Budget } from '../database/entities/budget.entity';
 import { CategoryRule } from '../database/entities/category-rule.entity';
 import { Account } from '../database/entities/account.entity';
+import { Category } from '../database/entities/category.entity';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { Account } from '../database/entities/account.entity';
       Budget,
       CategoryRule,
       Account,
+      Category,
     ]),
   ],
   controllers: [SyncController],

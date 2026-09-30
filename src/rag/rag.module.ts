@@ -1,7 +1,14 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { RagController } from './rag.controller';
+import { ChatHistoryController } from './chat-history.controller';
+import { ChatHistoryService } from './services/chat-history.service';
+import { PersonalContextService } from './services/personal-context.service';
+import { ChatConversation } from '../database/entities/chat-conversation.entity';
+import { ChatMessage } from '../database/entities/chat-message.entity';
+import { Account } from '../database/entities/account.entity';
 import { EmbeddingService } from './services/embedding.service';
 import { ChunkingService } from './services/chunking.service';
 import { VectorStoreService } from './services/vector-store.service';
@@ -23,6 +30,7 @@ import { InvestmentsModule } from '../investments/investments.module';
     ExpensesModule,
     LoansModule,
     InvestmentsModule,
+    TypeOrmModule.forFeature([ChatConversation, ChatMessage, Account]),
     BullModule.registerQueueAsync({
       name: INGESTION_QUEUE,
       imports: [ConfigModule],
@@ -35,7 +43,7 @@ import { InvestmentsModule } from '../investments/investments.module';
       inject: [ConfigService],
     }),
   ],
-  controllers: [RagController],
+  controllers: [RagController, ChatHistoryController],
   providers: [
     EmbeddingService,
     ChunkingService,
@@ -44,6 +52,8 @@ import { InvestmentsModule } from '../investments/investments.module';
     GenerationService,
     IngestionService,
     IngestionProcessor,
+    PersonalContextService,
+    ChatHistoryService,
   ],
   exports: [RetrievalService, GenerationService],
 })

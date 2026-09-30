@@ -23,8 +23,22 @@ export class Expense {
   @Column('float')
   amount: number;
 
+  /** Display name of the parent category (kept for older clients / Sheets). */
   @Column()
   category: string;
+
+  /** Parent category id, e.g. `food` (see src/categories/taxonomy.generated.ts). */
+  @Column({ type: 'varchar', nullable: true })
+  @Index()
+  categoryId: string | null;
+
+  /** Subcategory id, e.g. `food.delivery`. */
+  @Column({ type: 'varchar', nullable: true })
+  subcategoryId: string | null;
+
+  /** Display name of the subcategory. */
+  @Column({ type: 'varchar', nullable: true })
+  subcategory: string | null;
 
   @Column({ type: 'text', nullable: true })
   note: string | null;

@@ -7,18 +7,31 @@ import { Investment } from '../database/entities/investment.entity';
 import { Budget } from '../database/entities/budget.entity';
 import { CategoryRule } from '../database/entities/category-rule.entity';
 import { Account } from '../database/entities/account.entity';
+import { Category } from '../database/entities/category.entity';
+import { DataSource } from 'typeorm';
+
+const queryBuilder = () => {
+  const qb: any = {
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    addOrderBy: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    take: jest.fn().mockReturnThis(),
+    getMany: jest.fn().mockResolvedValue([]),
+  };
+  return qb;
+};
 
 const mockRepository = () => ({
   findOne: jest.fn(),
   create: jest.fn(entity => ({ id: 'mock-id', ...entity, updatedAt: new Date() })),
   save: jest.fn(entity => ({ ...entity, id: entity.id || 'mock-id', updatedAt: new Date() })),
-  createQueryBuilder: jest.fn(() => ({
-    where: jest.fn().mockReturnThis(),
-    andWhere: jest.fn().mockReturnThis(),
-    orderBy: jest.fn().mockReturnThis(),
-    take: jest.fn().mockReturnThis(),
-    getMany: jest.fn().mockResolvedValue([]),
-  })),
+  createQueryBuilder: jest.fn(queryBuilder),
+});
+
+const mockDataSource = () => ({
+  transaction: jest.fn(async (cb: any) => cb({ query: jest.fn() })),
 });
 
 describe('SyncService', () => {
@@ -37,6 +50,8 @@ describe('SyncService', () => {
         { provide: getRepositoryToken(Budget), useFactory: mockRepository },
         { provide: getRepositoryToken(CategoryRule), useFactory: mockRepository },
         { provide: getRepositoryToken(Account), useFactory: mockRepository },
+        { provide: getRepositoryToken(Category), useFactory: mockRepository },
+        { provide: DataSource, useFactory: mockDataSource },
       ],
     }).compile();
 
@@ -84,7 +99,43 @@ describe('SyncService', () => {
       expect(expenseRepo.save).toHaveBeenCalled();
     });
 
-    it('should return conflict if record already exists and has diverged', async () => {
+    it('derives category ids from a legacy category name', async () => {
+      expenseRepo.findOne.mockResolvedValue(null);
+      accountRepo.findOne.mockResolvedValue({ id: 'default_bank', userId: 'user-1' });
+
+      await service.processBatch('user-1', 'expense', [
+        {
+          clientId: 'c-legacy',
+          operationType: 'CREATE',
+          clientVersion: 1,
+          payload: { amount: 250, category: 'Food Delivery', date: '2026-07-18T20:30:00.000Z' },
+        },
+      ]);
+
+      expect(expenseRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ categoryId: 'food', subcategoryId: 'food.delivery' }),
+      );
+    });
+
+    it('keeps category ids sent by new clients', async () => {
+      expenseRepo.findOne.mockResolvedValue(null);
+      accountRepo.findOne.mockResolvedValue({ id: 'default_bank', userId: 'user-1' });
+
+      await service.processBatch('user-1', 'expense', [
+        {
+          clientId: 'c-new',
+          operationType: 'CREATE',
+          clientVersion: 1,
+          payload: { amount: 250, category: 'Food & Drinks', categoryId: 'food', subcategoryId: 'food.cafe', date: '2026-07-18T20:30:00.000Z' },
+        },
+      ]);
+
+      expect(expenseRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ categoryId: 'food', subcategoryId: 'food.cafe' }),
+      );
+    });
+
+    it('treats a replayed CREATE (e.g. SMS re-import after reinstall) as idempotent: server copy wins', async () => {
       accountRepo.findOne.mockResolvedValue({ id: 'default_bank', userId: 'user-1' });
       const existingExpense = {
         id: 'server-id-1',
@@ -128,8 +179,62 @@ describe('SyncService', () => {
       const result = await service.processBatch('user-1', 'expense', operations);
 
       expect(result).toHaveLength(1);
-      expect(result[0].status).toBe('conflict');
-      expect(result[0].remotePayload.amount).toBe(200);
+      expect(result[0].status).toBe('applied');
+      expect(result[0].serverId).toBe('server-id-1');
+      expect(result[0].isDeleted).toBe(false);
+      expect(result[0].serverPayload.amount).toBe(200);
+      expect(expenseRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('does not resurrect a record the user deleted', async () => {
+      accountRepo.findOne.mockResolvedValue({ id: 'default_bank', userId: 'user-1' });
+      const deleted = { id: 's-2', clientId: 'c-2', userId: 'user-1', amount: 100, version: 3, isDeleted: true, updatedAt: new Date() };
+      expenseRepo.findOne.mockResolvedValue(deleted);
+
+      const result = await service.processBatch('user-1', 'expense', [
+        { clientId: 'c-2', operationType: 'CREATE', clientVersion: 1, payload: { amount: 100, category: 'Food' } },
+      ]);
+
+      expect(result[0].status).toBe('applied');
+      expect(result[0].isDeleted).toBe(true);
+      expect(result[0].serverPayload).toBeUndefined();
+      expect(deleted.isDeleted).toBe(true);
+      expect(expenseRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('applies a CREATE whose local version is newer (edited before the first push was acknowledged)', async () => {
+      accountRepo.findOne.mockResolvedValue({ id: 'default_bank', userId: 'user-1' });
+      const existing: any = { id: 's-3', clientId: 'c-3', userId: 'user-1', amount: 100, version: 1, isDeleted: false, updatedAt: new Date() };
+      expenseRepo.findOne.mockResolvedValue(existing);
+
+      const result = await service.processBatch('user-1', 'expense', [
+        { clientId: 'c-3', operationType: 'CREATE', clientVersion: 2, payload: { amount: 120, category: 'Food' } },
+      ]);
+
+      expect(result[0].status).toBe('applied');
+      expect(existing.amount).toBe(120);
+      expect(existing.version).toBe(2);
+    });
+  });
+
+  describe('pull', () => {
+    it('pages with a compound cursor and reports hasMore', async () => {
+      const t = new Date('2026-09-01T10:00:00.000Z');
+      const rows = [1, 2, 3].map((i) => ({
+        id: `id-${i}`, clientId: `c-${i}`, version: 1, isDeleted: false, updatedAt: t,
+        amount: i, category: 'Food', date: t, createdAt: t,
+      }));
+      const qb = queryBuilder();
+      qb.getMany.mockResolvedValue(rows);
+      expenseRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const res = await service.pull('user-1', 'expense', '2026-09-01T09:00:00.000Z|id-0', 2);
+
+      expect(res.records).toHaveLength(2);
+      expect(res.hasMore).toBe(true);
+      expect(res.nextCursor).toBe(`${t.toISOString()}|id-2`);
+      expect(qb.limit).toHaveBeenCalledWith(3);
+      expect(qb.andWhere.mock.calls[0][1]).toEqual({ sinceDate: new Date('2026-09-01T09:00:00.000Z'), sinceId: 'id-0' });
     });
   });
 

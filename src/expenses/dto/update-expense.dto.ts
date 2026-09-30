@@ -15,6 +15,21 @@ export class UpdateExpenseDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(64)
+  categoryId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  subcategoryId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  subcategory?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(200)
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   note?: string;
