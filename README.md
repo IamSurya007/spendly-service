@@ -23,7 +23,28 @@
 
 ## Description
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+NestJS backend for Fiscora (Spendly): REST APIs, offline-first sync for the mobile app, and the AI assistant (RAG).
+
+- API reference: [API_DOCUMENTATION.md](API_DOCUMENTATION.md)
+- Sync protocol (push/pull, entities, conflict rules): [sync_api_specs.md](sync_api_specs.md)
+
+### Categories
+
+The category taxonomy (parents, subcategories, icons, colours, legacy-name mapping and merchant keywords) lives in [`shared/categories.json`](shared/categories.json). After editing it, regenerate the copies used by the backend, the Flutter app and the web app (sibling folders `../spendly` and `../spendly-web`):
+
+```bash
+$ node shared/generate-categories.mjs
+```
+
+Never change or reuse an existing category id: expenses, budgets and merchant rules reference them.
+
+### Startup data migration
+
+`CategoriesService` runs an idempotent backfill on every boot. It gives legacy expenses, merchant rules and budgets their category ids and merges budgets that map to the same parent. Schema changes are applied by TypeORM `synchronize` (new tables `categories`, `chat_conversations`, `chat_messages`; new columns on `expenses`, `category_rules`, `investments`). Deploy the backend before a mobile build that uses category ids.
+
+### Dependency note
+
+`@qdrant/js-client-rest` 1.19 removed the `search()` method used by `VectorStoreService`. Install 1.18.x (the version in `package-lock.json`) until that code moves to the new query API. `package-lock.json` is currently out of sync with `package.json`, so `npm ci` fails. Run `npm install` once and commit the updated lockfile.
 
 ## Project setup
 

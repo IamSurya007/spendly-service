@@ -160,6 +160,8 @@ Manages user profiles, FCM notification registration, and Firestore data migrati
 ### 3.2. Budgets API (`/budgets`)
 Configure monthly category limits and track budget safety thresholds (Warning at 80% usage, Exceeded at 100%).
 
+> **Category keys**: a budget's `category` is a **parent category id** (e.g. `food`, or a custom category UUID); see [Categories API](#37-categories-api-categories). Legacy names sent by older clients ("Food", "Groceries") are converted to the matching parent id, and budgets that map to the same parent are merged (limits added). Removed budgets are soft-deleted so the mobile app receives a tombstone.
+
 #### `GET /budgets/:month`
 * **Description**: Retrieve all budgets set for a specific month.
 * **URL Parameter**: `month` (Format: `YYYY-MM`, e.g., `2026-07`)
@@ -184,9 +186,9 @@ Configure monthly category limits and track budget safety thresholds (Warning at
   ```json
   {
     "budgets": [
-      { "category": "Food", "limit": 5000 },
-      { "category": "Rent", "limit": 15000 },
-      { "category": "Entertainment", "limit": 2000 }
+      { "category": "food", "limit": 5000 },
+      { "category": "housing", "limit": 15000 },
+      { "category": "entertainment", "limit": 2000 }
     ]
   }
   ```
@@ -204,7 +206,7 @@ Configure monthly category limits and track budget safety thresholds (Warning at
 * **Response**: The updated single budget object.
 
 #### `GET /budgets/:month/status`
-* **Description**: Get the progress of category limits vs. actual expenses for the month.
+* **Description**: Get the progress of category limits vs. actual expenses for the month. Includes the month's own budgets plus the mobile app's every-month (`month: "all"`) limits for categories that have no month-specific budget. Spend counts debits marked as spend, grouped by the expense's parent `categoryId`.
 * **URL Parameter**: `month` (`YYYY-MM`)
 * **Response**:
   ```json
@@ -212,7 +214,9 @@ Configure monthly category limits and track budget safety thresholds (Warning at
     "month": "2026-07",
     "budgets": [
       {
-        "category": "Food",
+        "category": "Food & Drinks",   // display name (custom renames applied)
+        "categoryId": "food",
+        "month": "all",                // "all" = limit set in the mobile app, applies every month
         "limit": 5000.0,
         "spent": 4200.0,
         "remaining": 800.0,
@@ -234,7 +238,10 @@ Log transactional spending. Integrates with automated SMS parsing and OCR receip
   ```json
   {
     "amount": 250.50,
-    "category": "Food",
+    "category": "Food & Drinks",       // Display name of the parent category
+    "categoryId": "food",              // Optional: derived from `category` when omitted
+    "subcategoryId": "food.cafe",      // Optional
+    "subcategory": "Coffee & Snacks",  // Optional display name
     "date": "2026-07-15T12:00:00.000Z", // Date string
     "note": "Lunch with team",         // Optional
     "method": "UPI",                   // Optional: "CASH" | "UPI" | "CARD" | "NET_BANKING" | "CHEQUE"
@@ -248,14 +255,15 @@ Log transactional spending. Integrates with automated SMS parsing and OCR receip
 * **Description**: Retrieve expenses filtered and paginated.
 * **Query Parameters** (`QueryExpenseDto`):
   * `month` (Required, format: `YYYY-MM`)
-  * `category` (Optional, string)
+  * `categoryId` (Optional, string): a category **or** subcategory id; matches expenses at either level
+  * `category` (Optional, string): legacy exact match on the category display name
   * `source` (Optional, enum: `MANUAL`, `SMS`, `OCR`)
   * `limit` (Optional, number, default: 50)
   * `cursor` (Optional, string representing the ID of the last expense in the previous page for cursor pagination)
-* **Response**: List of expense objects ordered by date (descending).
+* **Response**: List of expense objects ordered by date (descending). Deleted expenses are excluded.
 
 #### `GET /expenses/summary`
-* **Description**: Get total expenses, total income (default 0), net balance, and categories breakdown for a month.
+* **Description**: Get total expenses, total income (default 0), net balance, and a breakdown by parent category (largest first), each with its subcategories.
 * **Query Parameter**: `month` (Optional, format: `YYYY-MM`, defaults to the current month)
 * **Response**:
   ```json
@@ -266,14 +274,22 @@ Log transactional spending. Integrates with automated SMS parsing and OCR receip
     "balance": -18250.50,
     "byCategory": [
       {
-        "category": "Food",
-        "total": 4250.50,
-        "count": 12
+        "category": "Housing",
+        "categoryId": "housing",
+        "total": 14000.00,
+        "count": 1,
+        "subcategories": [
+          { "subcategory": "Rent", "subcategoryId": "housing.rent", "total": 14000.00, "count": 1 }
+        ]
       },
       {
-        "category": "Rent",
-        "total": 14000.00,
-        "count": 1
+        "category": "Food & Drinks",
+        "categoryId": "food",
+        "total": 4250.50,
+        "count": 12,
+        "subcategories": [
+          { "subcategory": "Food Delivery", "subcategoryId": "food.delivery", "total": 3100.00, "count": 8 }
+        ]
       }
     ]
   }
@@ -300,7 +316,7 @@ Log transactional spending. Integrates with automated SMS parsing and OCR receip
 * **Response**: Updated expense object.
 
 #### `DELETE /expenses/:id`
-* **Description**: Delete an expense.
+* **Description**: Delete an expense. This is a soft delete (`isDeleted = true`, version bumped) so the mobile app removes it on its next sync.
 * **Response**:
   ```json
   {
@@ -326,7 +342,7 @@ Track investments (FDs, RDs, SIPs, Mutual Funds). The system automatically calcu
     "startDate": "2026-07-01",
     "maturityDate": "2027-07-01",
     "institution": "HDFC Bank",    // Optional
-    "interestRate": 7.1,           // Optional (default: 6.5)
+    "interestRate": 7.1,           // Optional: stored, used for the RD maturity calculation (default 6.5) and shown to the AI assistant
     "maturityAmount": 62345        // Optional (auto-calculated for RD if left blank)
   }
   ```
@@ -372,7 +388,7 @@ Track investments (FDs, RDs, SIPs, Mutual Funds). The system automatically calcu
 * **Response**: Updated investment details.
 
 #### `DELETE /investments/:id`
-* **Description**: Delete an investment record.
+* **Description**: Delete an investment record (soft delete; excluded from lists, summaries and the AI context).
 * **Response**:
   ```json
   {
@@ -394,6 +410,7 @@ Track money borrowed from (TAKEN) or lent to (GIVEN) individuals or entities.
     "name": "Amit Sharma",
     "principal": 5000.0,
     "total": 5000.0,                   // Total amount to be repaid (including any interest agreed)
+    "interestRate": 12.0,              // Optional: annual %, shown to the AI assistant
     "repaymentDate": "2026-08-15",     // Optional
     "notes": "Lent for travel ticket"  // Optional
   }
@@ -443,7 +460,7 @@ Track money borrowed from (TAKEN) or lent to (GIVEN) individuals or entities.
 * **Response**: Updated loan object.
 
 #### `DELETE /loans/:id`
-* **Description**: Delete a loan record.
+* **Description**: Delete a loan record (soft delete; excluded from lists, summaries and the AI context).
 * **Response**:
   ```json
   {
@@ -490,6 +507,104 @@ Export financial details directly into a Google Sheet spreadsheet.
 #### `DELETE /sheets/disconnect`
 * **Description**: Clear sheets connection credentials.
 * **Response**: Updated User object.
+
+---
+
+### 3.7. Categories API (`/categories`)
+Transaction categories are a two-level taxonomy (parent → subcategory) with Phosphor icons and colours, in the style of the Fold app. System categories are defined once in `shared/categories.json` and generated into the backend, the Flutter app and the web app with `node shared/generate-categories.mjs`. Users can add custom categories and rename, recolour, hide or reorder system ones; those rows sync through `/sync/category` (see `sync_api_specs.md`, section 6.6).
+
+#### `GET /categories`
+* **Description**: The effective categories for the current user: system taxonomy with the user's overrides applied, plus custom categories. Parents come first in `sortOrder`, each followed by its subcategories.
+* **Response**:
+  ```json
+  {
+    "categories": [
+      { "id": "food", "name": "Food & Drinks", "icon": "fork-knife", "color": "#F97316", "kind": "expense", "parentId": null, "isSystem": true, "isHidden": false, "sortOrder": 0 },
+      { "id": "food.delivery", "name": "Food Delivery", "icon": "moped", "color": "#F97316", "kind": "expense", "parentId": "food", "isSystem": true, "isHidden": false, "sortOrder": 2 },
+      { "id": "7f1c…", "name": "Tiffin", "icon": "fork-knife", "color": "#F97316", "kind": "expense", "parentId": "food", "isSystem": false, "isHidden": false, "sortOrder": 5 }
+    ],
+    "defaults": { "debit": "misc", "credit": "income" },
+    "iconPalette": ["fork-knife", "moped", "…"],
+    "colorPalette": ["#F97316", "…"]
+  }
+  ```
+
+**Migration**: on every start the server runs an idempotent backfill (`CategoriesService.backfill`). It sets `categoryId` / `subcategoryId` on expenses and merchant rules that only have a legacy name, and converts legacy budget names to parent ids, merging budgets that land on the same parent. It keeps the same surviving row the app picks.
+
+---
+
+### 3.8. AI Assistant API (`/rag`)
+Answers questions using the user's live financial records plus a curated knowledge base (Qdrant vector search). Conversations are saved so they can be reopened and so follow-up questions work.
+
+**What the assistant sees about the user** (built fresh from Postgres on every question, `PersonalContextService`):
+* Spending for the last 3 months: totals, top categories and their top subcategories.
+* **Every open loan**, numbered `L1, L2, …`: counterparty, direction (you owe / owed to you), principal, total, interest rate, repayment date with days left or overdue, status, notes. Paid loans are counted.
+* **Every investment**, numbered `I1, I2, …`: type, institution, monthly amount and installments paid so far (RD/SIP) or amount invested, rate, expected maturity value, start date, time to maturity.
+* Account balances (name, type, last 4 digits, credit limit).
+* At most 25 loans and 25 investments are listed individually; the rest are summarised. Deleted records are never included.
+
+#### `POST /rag/ask`
+* **Description**: Ask a question. Omit `conversationId` to start a new conversation; pass it to continue one. The server then sends the last 6 messages to the model and also uses the previous question for knowledge-base search.
+* **Request Body** (`AskDto`):
+  ```json
+  {
+    "question": "And what interest am I paying on it?",
+    "conversationId": "3b1f…",        // Optional
+    "categoryFilter": ["loans"]         // Optional knowledge-base filter
+  }
+  ```
+* **Response**:
+  ```json
+  {
+    "answer": "Your HDFC Personal Loan (L1) is at 11.5% p.a. …",
+    "sources": [ { "docId": "…", "title": "Debt repayment strategies", "category": "loans", "score": 0.71 } ],
+    "grounded": true,
+    "conversationId": "3b1f…",
+    "conversationTitle": "When is my HDFC loan due?",
+    "userMessageId": "…",
+    "messageId": "…"
+  }
+  ```
+  Degraded answers (AI provider unavailable or quota reached) are returned but **not** saved, and then carry no new `conversationId`.
+
+#### `GET /rag/conversations`
+* **Description**: Saved conversations, most recent first. At most 100 are kept per user; older ones are removed.
+* **Query Parameters**: `cursor` (Optional, the `nextCursor` of the previous page), `limit` (Optional, default 30, max 50)
+* **Response**:
+  ```json
+  {
+    "items": [
+      { "id": "3b1f…", "title": "When is my HDFC loan due?", "lastMessageAt": "2026-10-01T09:30:00.000Z", "createdAt": "2026-10-01T09:29:00.000Z", "preview": "Your HDFC Personal Loan (L1) is due on…" }
+    ],
+    "nextCursor": null
+  }
+  ```
+
+#### `GET /rag/conversations/:id/messages`
+* **Description**: All messages of a conversation, oldest first.
+* **Response**:
+  ```json
+  {
+    "id": "3b1f…",
+    "title": "When is my HDFC loan due?",
+    "lastMessageAt": "2026-10-01T09:30:00.000Z",
+    "messages": [
+      { "id": "…", "role": "user", "content": "When is my HDFC loan due?", "sources": [], "grounded": false, "createdAt": "…" },
+      { "id": "…", "role": "assistant", "content": "On 10 Oct 2026 (in 9 days)…", "sources": [], "grounded": true, "createdAt": "…" }
+    ]
+  }
+  ```
+
+#### `PATCH /rag/conversations/:id`
+* **Description**: Rename a conversation.
+* **Request Body**: `{ "title": "HDFC loan questions" }`
+* **Response**: `{ "id": "3b1f…", "title": "HDFC loan questions" }`
+
+#### `DELETE /rag/conversations/:id`
+* **Description**: Permanently delete a conversation and its messages.
+* **Response**: `204 No Content`
+
+All `/rag/conversations` routes return `404` for unknown ids and `403` for another user's conversation.
 
 ---
 
