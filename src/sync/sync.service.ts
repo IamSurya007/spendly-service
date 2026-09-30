@@ -1,12 +1,17 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Expense } from '../database/entities/expense.entity';
 import { Loan } from '../database/entities/loan.entity';
 import { Investment } from '../database/entities/investment.entity';
 import { Budget } from '../database/entities/budget.entity';
 import { CategoryRule } from '../database/entities/category-rule.entity';
 import { Account } from '../database/entities/account.entity';
+import { Category } from '../database/entities/category.entity';
+import { resolveLegacyCategory, SYSTEM_BY_ID } from '../categories/category-resolver';
+import { LEGACY_CATEGORY_MAP } from '../categories/taxonomy.generated';
+
+const iso = (d: unknown) => (d instanceof Date ? d.toISOString() : d);
 
 @Injectable()
 export class SyncService {
@@ -23,6 +28,10 @@ export class SyncService {
     private readonly categoryRuleRepo: Repository<CategoryRule>,
     @InjectRepository(Account)
     private readonly accountRepo: Repository<Account>,
+    @InjectRepository(Category)
+    private readonly categoryRepo: Repository<Category>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {}
 
   private getRepository(entityType: string): Repository<any> {
@@ -39,21 +48,45 @@ export class SyncService {
         return this.categoryRuleRepo;
       case 'account':
         return this.accountRepo;
+      case 'category':
+        return this.categoryRepo;
       default:
         throw new BadRequestException(`Invalid entity type: ${entityType}`);
     }
   }
 
+  /**
+   * Budgets are keyed by parent category id. Older clients send a legacy
+   * name ("Groceries"); custom categories are UUIDs and are kept as-is.
+   */
+  private normalizeBudgetCategory(category: string | undefined): string {
+    const value = (category ?? '').trim();
+    const system = SYSTEM_BY_ID.get(value);
+    if (system) return system.parentId ?? system.id;
+    const lower = value.toLowerCase();
+    const isKnownName =
+      LEGACY_CATEGORY_MAP[lower] !== undefined ||
+      [...SYSTEM_BY_ID.values()].some((c) => c.name.toLowerCase() === lower);
+    return isKnownName ? resolveLegacyCategory(value).categoryId : value || 'misc';
+  }
+
   private mapPayloadToFields(entityType: string, payload: any): any {
     if (!payload) return {};
     switch (entityType) {
-      case 'expense':
+      case 'expense': {
         const isCountedAsSpend = payload.isCountedAsSpend !== undefined
           ? Boolean(payload.isCountedAsSpend)
           : (payload.is_counted_as_spend !== undefined ? Boolean(payload.is_counted_as_spend) : true);
+        const amount = typeof payload.amount === 'string' ? parseFloat(payload.amount) : (payload.amount || 0);
+        const derived = payload.categoryId
+          ? { categoryId: payload.categoryId, subcategoryId: payload.subcategoryId || null }
+          : resolveLegacyCategory(payload.category, amount < 0);
         return {
-          amount: typeof payload.amount === 'string' ? parseFloat(payload.amount) : (payload.amount || 0),
-          category: payload.category || 'Other',
+          amount,
+          category: payload.category || SYSTEM_BY_ID.get(derived.categoryId)?.name || 'Other',
+          categoryId: derived.categoryId,
+          subcategoryId: derived.subcategoryId || null,
+          subcategory: payload.subcategory || null,
           note: payload.note || null,
           date: payload.date ? new Date(payload.date) : new Date(),
           method: payload.method || 'UPI',
@@ -63,6 +96,7 @@ export class SyncService {
           isCountedAsSpend,
           createdAt: payload.createdAt ? new Date(payload.createdAt) : undefined,
         };
+      }
       case 'account':
         return {
           id: payload.id || undefined,
@@ -94,6 +128,11 @@ export class SyncService {
           principal: typeof payload.principal === 'string' ? parseFloat(payload.principal) : (payload.principal || 0),
           maturityAmount: typeof payload.maturityAmount === 'string' ? parseFloat(payload.maturityAmount) : (payload.maturityAmount || 0),
           durationMonths: typeof payload.durationMonths === 'string' ? parseInt(payload.durationMonths, 10) : (payload.durationMonths || 12),
+          // The mobile app does not send a rate for investments: leave the
+          // stored value alone (undefined is skipped by TypeORM on save).
+          interestRate: payload.interestRate === undefined
+            ? undefined
+            : (typeof payload.interestRate === 'string' ? parseFloat(payload.interestRate) : (payload.interestRate || 0)),
           startDate: payload.startDate ? new Date(payload.startDate) : new Date(),
           maturityDate: payload.maturityDate ? new Date(payload.maturityDate) : new Date(),
           institution: payload.institution || null,
@@ -102,15 +141,32 @@ export class SyncService {
       case 'budget':
         return {
           month: payload.month || '',
-          category: payload.category || 'Other',
+          category: this.normalizeBudgetCategory(payload.category),
           limit: typeof payload.limit === 'string' ? parseFloat(payload.limit) : (payload.limit || 0),
           createdAt: payload.createdAt ? new Date(payload.createdAt) : undefined,
         };
-      case 'category_rule':
+      case 'category_rule': {
+        const derived = payload.categoryId
+          ? { categoryId: payload.categoryId, subcategoryId: payload.subcategoryId || null }
+          : resolveLegacyCategory(payload.category);
         return {
           merchant: payload.merchant || '',
-          category: payload.category || 'Other',
+          category: payload.category || SYSTEM_BY_ID.get(derived.categoryId)?.name || 'Other',
+          categoryId: derived.categoryId,
+          subcategoryId: derived.subcategoryId || null,
           createdAt: payload.createdAt ? new Date(payload.createdAt) : undefined,
+        };
+      }
+      case 'category':
+        return {
+          name: (payload.name || 'Category').toString().slice(0, 64),
+          icon: payload.icon || 'tag',
+          color: /^#[0-9a-fA-F]{6}$/.test(payload.color ?? '') ? payload.color : '#9CA3AF',
+          kind: ['expense', 'income', 'transfer'].includes(payload.kind) ? payload.kind : 'expense',
+          parentId: payload.parentId || null,
+          isSystem: Boolean(payload.isSystem),
+          isHidden: Boolean(payload.isHidden),
+          sortOrder: typeof payload.sortOrder === 'number' ? Math.trunc(payload.sortOrder) : 0,
         };
       default:
         return {};
@@ -124,14 +180,17 @@ export class SyncService {
         return {
           amount: record.amount,
           category: record.category,
+          categoryId: record.categoryId || '',
+          subcategoryId: record.subcategoryId || '',
+          subcategory: record.subcategory || '',
           note: record.note || '',
-          date: record.date instanceof Date ? record.date.toISOString() : record.date,
+          date: iso(record.date),
           method: record.method,
           source: record.source,
           merchant: record.merchant || '',
           accountId: record.accountId || 'default_bank',
           isCountedAsSpend: record.isCountedAsSpend ?? true,
-          createdAt: record.createdAt instanceof Date ? record.createdAt.toISOString() : record.createdAt,
+          createdAt: iso(record.createdAt),
         };
       case 'account':
         return {
@@ -142,7 +201,7 @@ export class SyncService {
           creditLimit: record.creditLimit,
           accountNumberLast4: record.accountNumberLast4 || '',
           colorValue: record.colorValue,
-          createdAt: record.createdAt instanceof Date ? record.createdAt.toISOString() : record.createdAt,
+          createdAt: iso(record.createdAt),
         };
       case 'loan':
         return {
@@ -151,12 +210,12 @@ export class SyncService {
           principal: record.principal,
           total: record.total,
           interestRate: record.interestRate,
-          repaymentDate: record.repaymentDate instanceof Date 
-            ? record.repaymentDate.toISOString().substring(0, 10) 
+          repaymentDate: record.repaymentDate instanceof Date
+            ? record.repaymentDate.toISOString().substring(0, 10)
             : (record.repaymentDate ? record.repaymentDate.substring(0, 10) : null),
           status: record.status,
           notes: record.notes || '',
-          createdAt: record.createdAt instanceof Date ? record.createdAt.toISOString() : record.createdAt,
+          createdAt: iso(record.createdAt),
         };
       case 'investment':
         return {
@@ -166,11 +225,12 @@ export class SyncService {
           principal: record.principal,
           maturityAmount: record.maturityAmount,
           durationMonths: record.durationMonths,
-          startDate: record.startDate instanceof Date 
-            ? record.startDate.toISOString().substring(0, 10) 
+          interestRate: record.interestRate ?? 0,
+          startDate: record.startDate instanceof Date
+            ? record.startDate.toISOString().substring(0, 10)
             : (record.startDate ? record.startDate.substring(0, 10) : ''),
-          maturityDate: record.maturityDate instanceof Date 
-            ? record.maturityDate.toISOString().substring(0, 10) 
+          maturityDate: record.maturityDate instanceof Date
+            ? record.maturityDate.toISOString().substring(0, 10)
             : (record.maturityDate ? record.maturityDate.substring(0, 10) : ''),
           institution: record.institution || '',
         };
@@ -184,6 +244,19 @@ export class SyncService {
         return {
           merchant: record.merchant,
           category: record.category,
+          categoryId: record.categoryId || '',
+          subcategoryId: record.subcategoryId || '',
+        };
+      case 'category':
+        return {
+          name: record.name,
+          icon: record.icon,
+          color: record.color,
+          kind: record.kind,
+          parentId: record.parentId,
+          isSystem: record.isSystem,
+          isHidden: record.isHidden,
+          sortOrder: record.sortOrder,
         };
       default:
         return {};
@@ -234,7 +307,7 @@ export class SyncService {
         where: {
           userId,
           month: payload.month,
-          category: payload.category,
+          category: this.normalizeBudgetCategory(payload.category),
         },
       });
     } else if (entityType === 'account' && payload?.id) {
@@ -276,192 +349,190 @@ export class SyncService {
     return false;
   }
 
+  private applied(clientId: string, record: any, extra: Record<string, unknown> = {}) {
+    return {
+      clientId,
+      status: 'applied',
+      serverId: record.id,
+      serverVersion: record.version,
+      serverUpdatedAt: record.updatedAt ? record.updatedAt.toISOString() : new Date().toISOString(),
+      ...extra,
+    };
+  }
+
   async processBatch(userId: string, entityType: string, operations: any[]): Promise<any[]> {
     const repo = this.getRepository(entityType);
-    const results: any[] = [];
 
-    for (const op of operations) {
-      const { clientId, operationType, clientVersion, payload } = op;
-      if (!clientId) {
-        results.push({
-          clientId,
-          status: 'rejected',
-        });
-        continue;
+    // Serialise batches per user + entity type. Two overlapping batches with
+    // the same clientId (retry racing the original request) could otherwise
+    // both miss `findExistingRecord` and insert duplicate rows. The lock is
+    // released when the (otherwise empty) transaction ends.
+    return this.dataSource.transaction(async (manager) => {
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`sync:${userId}:${entityType}`]);
+      const results: any[] = [];
+      for (const op of operations) {
+        results.push(await this.processOperation(repo, userId, entityType, op));
       }
+      return results;
+    });
+  }
 
-      if (entityType === 'expense' && (operationType === 'CREATE' || operationType === 'UPDATE')) {
-        const targetAccountId = payload?.accountId || 'default_bank';
-        const validAccount = await this.ensureAccountExists(userId, targetAccountId);
-        if (!validAccount) {
-          results.push({
-            clientId,
-            status: 'rejected',
-          });
-          continue;
-        }
-      }
+  private async processOperation(repo: Repository<any>, userId: string, entityType: string, op: any): Promise<any> {
+    const { clientId, operationType, clientVersion, payload } = op;
+    if (!clientId) {
+      return { clientId, status: 'rejected' };
+    }
 
-      try {
-        const existing = await this.findExistingRecord(repo, entityType, userId, clientId, payload);
-
-        if (operationType === 'CREATE') {
-          if (!existing) {
-            const mapped = this.mapPayloadToFields(entityType, payload);
-            const entity = repo.create({
-              ...mapped,
-              userId,
-              clientId,
-              version: 1,
-              isDeleted: false,
-            });
-            await repo.save(entity);
-            results.push({
-              clientId,
-              status: 'applied',
-              serverId: entity.id,
-              serverVersion: 1,
-              serverUpdatedAt: entity.updatedAt ? entity.updatedAt.toISOString() : new Date().toISOString(),
-            });
-          } else {
-            // Already exists - run concurrency/update check
-            const diverged = this.hasDiverged(entityType, existing, payload);
-            if (existing.version >= (clientVersion || 1) && diverged) {
-              results.push({
-                clientId,
-                status: 'conflict',
-                remotePayload: this.getPayload(entityType, existing),
-              });
-            } else {
-              const mapped = this.mapPayloadToFields(entityType, payload);
-              Object.assign(existing, mapped);
-              existing.clientId = clientId; // Associate this clientId with the record
-              existing.version = (existing.version || 1) + 1;
-              existing.isDeleted = false;
-              existing.updatedAt = new Date();
-              await repo.save(existing);
-              results.push({
-                clientId,
-                status: 'applied',
-                serverId: existing.id,
-                serverVersion: existing.version,
-                serverUpdatedAt: existing.updatedAt.toISOString(),
-              });
-            }
-          }
-        } else if (operationType === 'UPDATE') {
-          if (!existing) {
-            // Upsert if not found
-            const mapped = this.mapPayloadToFields(entityType, payload);
-            const entity = repo.create({
-              ...mapped,
-              userId,
-              clientId,
-              version: clientVersion || 1,
-              isDeleted: false,
-            });
-            await repo.save(entity);
-            results.push({
-              clientId,
-              status: 'applied',
-              serverId: entity.id,
-              serverVersion: entity.version,
-              serverUpdatedAt: entity.updatedAt ? entity.updatedAt.toISOString() : new Date().toISOString(),
-            });
-          } else {
-            const diverged = this.hasDiverged(entityType, existing, payload);
-            if (existing.version >= (clientVersion || 1) && diverged) {
-              results.push({
-                clientId,
-                status: 'conflict',
-                remotePayload: this.getPayload(entityType, existing),
-              });
-            } else {
-              const mapped = this.mapPayloadToFields(entityType, payload);
-              Object.assign(existing, mapped);
-              existing.clientId = clientId; // Associate this clientId with the record
-              existing.version = (existing.version || 1) + 1;
-              existing.isDeleted = false;
-              existing.updatedAt = new Date();
-              await repo.save(existing);
-              results.push({
-                clientId,
-                status: 'applied',
-                serverId: existing.id,
-                serverVersion: existing.version,
-                serverUpdatedAt: existing.updatedAt.toISOString(),
-              });
-            }
-          }
-        } else if (operationType === 'DELETE') {
-          if (!existing) {
-            // If doesn't exist, create it as soft-deleted to keep tombstone
-            const mapped = this.mapPayloadToFields(entityType, payload);
-            const entity = repo.create({
-              ...mapped,
-              userId,
-              clientId,
-              version: clientVersion || 1,
-              isDeleted: true,
-            });
-            await repo.save(entity);
-            results.push({
-              clientId,
-              status: 'applied',
-              serverId: entity.id,
-              serverVersion: entity.version,
-              serverUpdatedAt: entity.updatedAt ? entity.updatedAt.toISOString() : new Date().toISOString(),
-            });
-          } else {
-            existing.isDeleted = true;
-            existing.clientId = clientId; // Associate this clientId with the record
-            existing.version = (existing.version || 1) + 1;
-            existing.updatedAt = new Date();
-            await repo.save(existing);
-            results.push({
-              clientId,
-              status: 'applied',
-              serverId: existing.id,
-              serverVersion: existing.version,
-              serverUpdatedAt: existing.updatedAt.toISOString(),
-            });
-          }
-        } else {
-          results.push({
-            clientId,
-            status: 'rejected',
-          });
-        }
-      } catch (err) {
-        console.error(`Sync error on operation:`, op, err);
-        results.push({
-          clientId,
-          status: 'rejected',
-        });
+    if (entityType === 'expense' && (operationType === 'CREATE' || operationType === 'UPDATE')) {
+      const targetAccountId = payload?.accountId || 'default_bank';
+      const validAccount = await this.ensureAccountExists(userId, targetAccountId);
+      if (!validAccount) {
+        return { clientId, status: 'rejected' };
       }
     }
 
-    return results;
+    try {
+      const existing = await this.findExistingRecord(repo, entityType, userId, clientId, payload);
+
+      if (operationType === 'CREATE') {
+        if (!existing) {
+          const mapped = this.mapPayloadToFields(entityType, payload);
+          const entity = repo.create({
+            ...mapped,
+            userId,
+            clientId,
+            version: 1,
+            isDeleted: false,
+          });
+          await repo.save(entity);
+          return this.applied(clientId, entity);
+        }
+
+        // The record already exists. A CREATE whose version is not newer than
+        // the server's is a replay: a retry, or the same record created again
+        // after a reinstall (SMS re-import, re-created SMS account). That is
+        // idempotent: the server copy wins and is sent back, and a record the
+        // user deleted stays deleted.
+        if ((clientVersion || 1) <= (existing.version || 1)) {
+          return this.applied(clientId, existing, {
+            isDeleted: Boolean(existing.isDeleted),
+            serverPayload: existing.isDeleted ? undefined : this.getPayload(entityType, existing),
+          });
+        }
+
+        // Newer local version (edited before the first push was acknowledged).
+        const mapped = this.mapPayloadToFields(entityType, payload);
+        Object.assign(existing, mapped);
+        existing.clientId = clientId;
+        existing.version = (existing.version || 1) + 1;
+        existing.updatedAt = new Date();
+        await repo.save(existing);
+        return this.applied(clientId, existing);
+      }
+
+      if (operationType === 'UPDATE') {
+        if (!existing) {
+          // Upsert if not found
+          const mapped = this.mapPayloadToFields(entityType, payload);
+          const entity = repo.create({
+            ...mapped,
+            userId,
+            clientId,
+            version: clientVersion || 1,
+            isDeleted: false,
+          });
+          await repo.save(entity);
+          return this.applied(clientId, entity);
+        }
+
+        const diverged = this.hasDiverged(entityType, existing, payload);
+        if (existing.version >= (clientVersion || 1) && diverged) {
+          return {
+            clientId,
+            status: 'conflict',
+            remotePayload: this.getPayload(entityType, existing),
+          };
+        }
+        const mapped = this.mapPayloadToFields(entityType, payload);
+        Object.assign(existing, mapped);
+        existing.clientId = clientId; // Associate this clientId with the record
+        existing.version = (existing.version || 1) + 1;
+        existing.isDeleted = false;
+        existing.updatedAt = new Date();
+        await repo.save(existing);
+        return this.applied(clientId, existing);
+      }
+
+      if (operationType === 'DELETE') {
+        if (!existing) {
+          // If doesn't exist, create it as soft-deleted to keep tombstone
+          const mapped = this.mapPayloadToFields(entityType, payload);
+          const entity = repo.create({
+            ...mapped,
+            userId,
+            clientId,
+            version: clientVersion || 1,
+            isDeleted: true,
+          });
+          await repo.save(entity);
+          return this.applied(clientId, entity);
+        }
+        existing.isDeleted = true;
+        existing.clientId = clientId; // Associate this clientId with the record
+        existing.version = (existing.version || 1) + 1;
+        existing.updatedAt = new Date();
+        await repo.save(existing);
+        return this.applied(clientId, existing);
+      }
+
+      return { clientId, status: 'rejected' };
+    } catch (err) {
+      console.error(`Sync error on operation:`, op, err);
+      return { clientId, status: 'rejected' };
+    }
   }
 
+  /**
+   * Cursor format: `<ISO updatedAt>|<id>`. The id tie-breaker makes paging
+   * exact when several rows share an updatedAt (bulk imports), which a plain
+   * `updatedAt > since` cursor skipped at page boundaries. A bare ISO date
+   * from older clients is still accepted.
+   */
   async pull(userId: string, entityType: string, since?: string, limit: number = 200): Promise<any> {
     const repo = this.getRepository(entityType);
+    const pageSize = Math.min(Math.max(limit || 200, 1), 500);
+
+    // Postgres keeps microseconds, JS dates (and so the cursor) only
+    // milliseconds: compare and order on the millisecond-truncated value, or
+    // rows within the same millisecond would be skipped or repeated.
+    const updatedMs = `date_trunc('milliseconds', "entity"."updatedAt")`;
 
     const queryBuilder = repo.createQueryBuilder('entity')
       .where('entity.userId = :userId', { userId });
 
     if (since) {
-      const sinceDate = new Date(since);
+      const [datePart, idPart] = since.split('|');
+      const sinceDate = new Date(datePart);
       if (!isNaN(sinceDate.getTime())) {
-        queryBuilder.andWhere('entity.updatedAt > :sinceDate', { sinceDate });
+        if (idPart) {
+          queryBuilder.andWhere(
+            `(${updatedMs} > :sinceDate OR (${updatedMs} = :sinceDate AND "entity"."id" > :sinceId))`,
+            { sinceDate, sinceId: idPart },
+          );
+        } else {
+          queryBuilder.andWhere(`${updatedMs} > :sinceDate`, { sinceDate });
+        }
       }
     }
 
     queryBuilder
-      .orderBy('entity.updatedAt', 'ASC')
-      .take(limit);
+      .orderBy(updatedMs, 'ASC')
+      .addOrderBy('entity.id', 'ASC')
+      .limit(pageSize + 1);
 
-    const records = await queryBuilder.getMany();
+    const fetched = await queryBuilder.getMany();
+    const hasMore = fetched.length > pageSize;
+    const records = hasMore ? fetched.slice(0, pageSize) : fetched;
 
     const activeRecords = records.filter(r => !r.isDeleted);
     const deletedRecords = records.filter(r => r.isDeleted);
@@ -481,16 +552,17 @@ export class SyncService {
 
     const tombstones = deletedRecords.map(r => r.clientId).filter(cid => !!cid);
 
-    let nextCursor = new Date().toISOString();
+    let nextCursor = since ?? null;
     if (records.length > 0) {
-      const latestRecord = records[records.length - 1];
-      nextCursor = latestRecord.updatedAt.toISOString();
+      const last = records[records.length - 1];
+      nextCursor = `${last.updatedAt.toISOString()}|${last.id}`;
     }
 
     return {
       records: formattedRecords,
       tombstones,
       nextCursor,
+      hasMore,
     };
   }
 }

@@ -109,6 +109,8 @@ The client batches pending local mutations (creates, updates, and deletes) from 
   ```
 
 ### Backend Processing Logic for Push Batch:
+Batches for the same user and entity type are serialised with a Postgres advisory lock (`pg_advisory_xact_lock`), so a retry racing the original request cannot insert the same `clientId` twice.
+
 For each operation in the batch:
 1. **Find Existing Record**: Look up the record by its `clientId` under the authenticated user (`uid`).
 2. **Handle CREATE**:
@@ -116,8 +118,11 @@ For each operation in the batch:
      - Save the record with the payload.
      - Set `version = 1`, `isDeleted = false`, `updatedAt = current_time()`.
      - Return status `applied` with the `serverId`, `serverVersion = 1`, and `serverUpdatedAt`.
-   - If the record already exists:
-     - Treat it as an update conflict or update validation check.
+   - If the record already exists and `clientVersion <= server_record.version`, the CREATE is a **replay** (a retried request, or the same record created again after a reinstall, e.g. an SMS re-import). It is idempotent:
+     - Nothing is written. Return status `applied` with the server's `serverId` / `serverVersion` / `serverUpdatedAt`, plus:
+       - `isDeleted: true` if the user had deleted the record (it is **not** resurrected; the client marks its copy deleted), or
+       - `serverPayload`: the server's current fields, which the client applies over its local copy (server wins).
+   - If the record exists and `clientVersion > server_record.version` (the client edited the record before its first push was acknowledged), apply the payload as an update.
 3. **Handle UPDATE**:
    - If the record does not exist:
      - Upsert it, or return rejected/conflict depending on backend policy (usually it should be created if not exists, but setting correct version).
@@ -134,10 +139,10 @@ The client queries the server to pull changes made to the user's data (by web in
 
 * **GET /sync/<entityType>**
 * **Path Parameters**:
-  - `entityType`: The model collection. (e.g. `expense`, `loan`, `investment`, `budget`, `category_rule`).
+  - `entityType`: The model collection: `account`, `category`, `expense`, `loan`, `investment`, `budget`, `category_rule`. Clients pull `account` and `category` first because expenses reference them.
 * **Query Parameters**:
-  - `since` (Optional): A cursor representing the timestamp or token from the last successful sync pull. In Spendly, this maps to the server's `updatedAt` timestamp of the last pulled record. (Format: ISO 8601 string, e.g., `2026-07-15T09:48:25.000Z`).
-  - `limit` (Optional, Default: 200): Maximum number of records to return.
+  - `since` (Optional): The opaque `nextCursor` returned by the previous pull. Format `<ISO updatedAt>|<record id>` (e.g. `2026-07-15T09:48:25.123Z|3f2a…`). The id tie-breaker makes paging exact when many rows share one `updatedAt` (bulk imports). A bare ISO timestamp from older clients is still accepted.
+  - `limit` (Optional, Default: 200, max 500): Maximum number of records to return.
 * **Expected Response Schema**:
   ```json
   {
@@ -157,30 +162,37 @@ The client queries the server to pull changes made to the user's data (by web in
       "clientId-of-deleted-record-1",
       "clientId-of-deleted-record-2"
     ],
-    "nextCursor": "2026-07-18T00:15:00.000Z"
+    "nextCursor": "2026-07-18T00:15:00.000Z|server-database-id-1",
+    "hasMore": false
   }
   ```
   *Note*: The fields can either be nested inside a payload key or flattened at the root of each item in `records` since the client fallback reads `item['payload'] ?? item`.
 
 ### Backend Processing Logic for Pull:
 1. Fetch all records of `<entityType>` for the authenticated `uid`.
-2. Filter for records where `updatedAt > since` (if `since` cursor is provided).
-3. Sort results by `updatedAt` ascending.
+2. Filter for records after the cursor: `updatedAt > since` or (`updatedAt = since` and `id > sinceId`). `updatedAt` is compared truncated to milliseconds, matching the precision of JS dates and the cursor.
+3. Sort results by (`updatedAt`, `id`) ascending and take `limit + 1` rows; `hasMore` is true when the extra row exists.
 4. Separate the results:
    - Active/Updated records: Items where `isDeleted = false` go to `records`.
    - Deleted records (Tombstones): Items where `isDeleted = true` go to the `tombstones` array (only their `clientId` is required).
-5. Set `nextCursor` to the `updatedAt` timestamp of the latest record processed in this batch, or the current server time if no records are found.
+5. Set `nextCursor` to `<updatedAt>|<id>` of the last record in the page. With no records, the incoming cursor is returned unchanged.
+
+### Client Pull Loop
+The app keeps pulling pages while `hasMore` is true (older servers without `hasMore`: while a full page came back). The 30-second pull throttle only applies to the first page of a pull, never to the pages after it. Before an SMS inbox scan the app calls `SyncEngine.syncNow()`, which pushes pending changes and pulls every entity completely, so duplicate detection sees all transactions saved on the server (important right after a reinstall).
 
 ## 6. Entity Schemas
-Each sync endpoint's payload contains the JSON representation of the entity. The structures for all 5 entities are specified below.
+Each sync endpoint's payload contains the JSON representation of the entity. The structures for all 7 entities are specified below.
 
 ### 6.1. Expense (`expense`)
 Represents individual transactions or financial expenses.
 
 | Field | Type | Required | Format / Enum Values | Description |
 |---|---|---|---|---|
-| `amount` | double | Yes | Decimal number | The transaction amount. |
-| `category` | string | Yes | E.g. "Food", "Travel" | Category of the expense. |
+| `amount` | double | Yes | Decimal number | The transaction amount (negative = credit/income). |
+| `category` | string | Yes | E.g. "Food & Drinks" | Display name of the parent category when written. Older clients send only this; the server then derives the ids below from it. |
+| `categoryId` | string | No | E.g. `food` | Parent category id (see "Category ids" below). |
+| `subcategoryId` | string | No | E.g. `food.delivery` | Subcategory id, empty if only a parent is set. |
+| `subcategory` | string | No | E.g. "Food Delivery" | Display name of the subcategory. |
 | `note` | string | Yes | Text string | Additional description/memo. |
 | `date` | string | Yes | ISO 8601 UTC timestamp | The date the expense occurred. |
 | `method` | string | Yes | `CASH`, `UPI`, `CARD`, `NETBANKING` | Mode of payment (Uppercase). |
@@ -196,6 +208,9 @@ Represents individual transactions or financial expenses.
   "id": "uuid-v4-string",
   "amount": 2500.00,
   "category": "Groceries",
+  "categoryId": "groceries",
+  "subcategoryId": "groceries.quick",
+  "subcategory": "Quick Commerce",
   "note": "Weekly supermarket shopping",
   "date": "2026-09-17T14:00:00.000Z",
   "method": "UPI",
@@ -206,6 +221,8 @@ Represents individual transactions or financial expenses.
   "createdAt": "2026-09-17T14:05:00.000Z"
 }
 ```
+
+**SMS-derived expenses**: the `clientId` is a deterministic UUID v5 of `fiscora:sms:v2:<sender>|<sent time in seconds>|<normalised body>` (`SmsDedup.key` in the app). The same SMS always produces the same `clientId`, whether it was scanned from the inbox or captured live, and on any install, so the replay rule in Section 4 deduplicates re-imports. Rows imported by older builds used `fiscora:sms:<dateMs>_<amount>_<merchant>`; the app still recognises those.
 
 ### 6.2. Account (`account`)
 Represents user bank accounts, credit cards, cash, and digital wallets.
@@ -274,6 +291,7 @@ Represents asset allocations and recurring deposits.
 | `principal` | double | Yes | Decimal number | Total capital invested. |
 | `maturityAmount` | double | Yes | Decimal number | Projected maturity value. |
 | `durationMonths` | integer | Yes | Positive integer | Term of the investment. |
+| `interestRate` | double | No | Decimal percentage | Annual rate. Omitted by the mobile app; when absent, the stored value is left unchanged. |
 | `startDate` | string | Yes | `YYYY-MM-DD` | Start date of the investment. |
 | `maturityDate` | string | Yes | `YYYY-MM-DD` | Final maturity date. |
 | `institution` | string | Yes | Text string | E.g. "HDFC Bank", "Zerodha Coin". |
@@ -294,38 +312,73 @@ Represents asset allocations and recurring deposits.
 ```
 
 ### 6.4. Budget (`budget`)
-Represents category spending limits set for specific months.
+Represents category spending limits.
 
 | Field | Type | Required | Format / Enum Values | Description |
 |---|---|---|---|---|
-| `month` | string | Yes | `YYYY-MM` | Target budget month. |
-| `category` | string | Yes | Text string | The target category (e.g. "Shopping"). |
+| `month` | string | Yes | `YYYY-MM`, or `all` | Target budget month. The mobile app stores limits that apply to every month under `all`. |
+| `category` | string | Yes | Parent category id | E.g. `shopping`, or a custom category UUID. Legacy names ("Shopping") sent by older clients are converted to the parent id. |
 | `limit` | double | Yes | Decimal number | Maximum allowed expenditure. |
 
 **Example Payload**:
 ```json
 {
-  "month": "2026-07",
-  "category": "Shopping",
+  "month": "all",
+  "category": "shopping",
   "limit": 15000.00
 }
 ```
 
 ### 6.5. Category Rule (`category_rule`)
-A rule maps SMS transaction text merchants to specific expense categories automatically.
+A rule maps SMS transaction merchants to a category automatically. Rules are only stored when the user picks a category for a merchant; keyword guesses are not saved as rules.
 
 | Field | Type | Required | Format / Enum Values | Description |
 |---|---|---|---|---|
-| `merchant` | string | Yes | Text string | Match pattern or exact merchant name. |
-| `category` | string | Yes | Text string | The auto-assigned category. |
+| `merchant` | string | Yes | Text string | Exact merchant name (matched case-insensitively). |
+| `category` | string | Yes | Text string | Display name of the parent category. |
+| `categoryId` | string | No | E.g. `transport` | Parent category id (derived from `category` if missing). |
+| `subcategoryId` | string | No | E.g. `transport.cab` | Subcategory id. |
 
 **Example Payload**:
 ```json
 {
   "merchant": "uber trip",
-  "category": "Transport"
+  "category": "Transport",
+  "categoryId": "transport",
+  "subcategoryId": "transport.cab"
 }
 ```
+
+### 6.6. Category (`category`)
+A user's custom category or subcategory, or the user's override of a system category. `clientId` is the category id: a UUID for custom categories, the system slug (e.g. `food`) for overrides. System categories themselves are never synced; every client ships the same generated taxonomy.
+
+| Field | Type | Required | Format / Enum Values | Description |
+|---|---|---|---|---|
+| `name` | string | Yes | Max 64 chars | Display name. |
+| `icon` | string | Yes | Phosphor icon key, e.g. `fork-knife` | Icon shown on the coloured tile. |
+| `color` | string | Yes | `#RRGGBB` | Tile colour. |
+| `kind` | string | Yes | `expense`, `income`, `transfer` | Which picker tab it appears under. |
+| `parentId` | string | No | Category id, or `null` | Set for subcategories. |
+| `isSystem` | boolean | Yes | | `true` for an override of a system category. |
+| `isHidden` | boolean | Yes | | Hidden categories still resolve on old transactions but are not offered in pickers. |
+| `sortOrder` | integer | Yes | | Display order (parents use steps of 100). |
+
+**Example Payload**:
+```json
+{
+  "name": "Tiffin",
+  "icon": "fork-knife",
+  "color": "#F97316",
+  "kind": "expense",
+  "parentId": "food",
+  "isSystem": false,
+  "isHidden": false,
+  "sortOrder": 5
+}
+```
+
+### Category ids
+System category ids are stable slugs (`food`, `food.delivery`, …) defined in `shared/categories.json`. That file also holds the legacy-name mapping (e.g. "Coffee & Snacks" → `food` / `food.cafe`) that the server, the app and the web all apply to records written before ids existed. On startup the server backfills ids for existing expenses, rules and budgets (see `CategoriesService.backfill`).
 
 ## 7. Conflict Resolution Guidelines
 In case the client receives a status conflict during a batch push, it uses a state-driven conflict resolver to decide the winning version.

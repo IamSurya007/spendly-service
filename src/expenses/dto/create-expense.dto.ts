@@ -12,6 +12,23 @@ export class CreateExpenseDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   category: string;
 
+  /** Parent category id (e.g. `food`). Derived from `category` when omitted. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  categoryId?: string;
+
+  /** Subcategory id (e.g. `food.delivery`). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  subcategoryId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  subcategory?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(200)

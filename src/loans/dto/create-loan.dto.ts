@@ -19,6 +19,12 @@ export class CreateLoanDto {
   @Min(0.01)
   total: number;
 
+  /** Annual interest rate in percent. */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  interestRate?: number;
+
   @IsOptional()
   @IsDateString()
   repaymentDate?: string;
